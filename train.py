@@ -1,9 +1,19 @@
 from denoising_diffusion_pytorch import Unet, GaussianDiffusion, Trainer
+import argparse
+import torch
+import torch.nn as nn
+import torch.optim as optim
+
+parser = argparse.ArgumentParser()
+parser.add_argument('--gpus', type=int, nargs='+', default=[0, 1])
+args = parser.parse_args()
 
 model = Unet(
     dim = 64,
     dim_mults = (1, 2, 4, 8)
 ).cuda()
+
+model = nn.DataParallel(model, device_ids=args.gpus)
 
 diffusion = GaussianDiffusion(
     model,

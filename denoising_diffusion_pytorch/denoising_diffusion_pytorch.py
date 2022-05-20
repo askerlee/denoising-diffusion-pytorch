@@ -636,7 +636,7 @@ class Trainer(object):
                     img_save_path = str(self.results_folder / f'sample-{milestone}.png')
                     utils.save_image(all_images, img_save_path, nrow = 6)
                     self.save(milestone)
-                    print(f"Sampled {img_save_path}\n")
+                    print(f"Sampled {img_save_path}")
 
                 self.step += 1
                 pbar.update(1)
