@@ -437,7 +437,7 @@ class GaussianDiffusion(nn.Module):
         b = shape[0]
         img = torch.randn(shape, device=device)
 
-        for i in tqdm(reversed(range(0, self.num_timesteps)), desc='sampling loop time step', total=self.num_timesteps):
+        for i in reversed(range(0, self.num_timesteps)):
             img = self.p_sample(img, torch.full((b,), i, device=device, dtype=torch.long))
 
         img = unnormalize_to_zero_to_one(img)
@@ -637,8 +637,8 @@ class Trainer(object):
                     img_save_path = str(self.results_folder / f'sample-{milestone}.png')
                     utils.save_image(all_images, img_save_path, nrow = 6)
                     self.save(milestone)
-                    print(f"Sampled {img_save_path}")
-                    
+                    print(f"Sampled {img_save_path}\n")
+
                 self.step += 1
                 pbar.update(1)
 
