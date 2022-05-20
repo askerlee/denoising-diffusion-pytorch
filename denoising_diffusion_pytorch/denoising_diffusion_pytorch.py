@@ -343,7 +343,14 @@ class GaussianDiffusion(nn.Module):
         objective = 'pred_noise'
     ):
         super().__init__()
-        assert not (type(self) == GaussianDiffusion and denoise_fn.channels != denoise_fn.out_dim)
+        if isinstance(denoise_fn, torch.nn.DataParallel):
+            denoise_fn_channels = denoise_fn.module.channels
+            denoise_fn_out_dim  = denoise_fn.module.out_dim
+        else:
+            denoise_fn_channels = denoise_fn.channels
+            denoise_fn_out_dim  = denoise_fn.out_dim
+
+        assert not (type(self) == GaussianDiffusion and denoise_fn_channels != denoise_fn_out_dim)
 
         self.channels = channels
         self.image_size = image_size

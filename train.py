@@ -11,9 +11,10 @@ args = parser.parse_args()
 model = Unet(
     dim = 64,
     dim_mults = (1, 2, 4, 8)
-).cuda()
+)
 
 model = nn.DataParallel(model, device_ids=args.gpus)
+model.cuda()
 
 diffusion = GaussianDiffusion(
     model,
