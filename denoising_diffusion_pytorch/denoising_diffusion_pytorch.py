@@ -566,7 +566,8 @@ class Trainer(object):
         self.train_num_steps = train_num_steps
 
         self.ds = Dataset(folder, image_size)
-        self.dl = cycle(data.DataLoader(self.ds, batch_size = train_batch_size, shuffle=True, pin_memory=True))
+        self.dl = cycle(data.DataLoader(self.ds, batch_size = train_batch_size, shuffle=True, 
+                                        pin_memory=True, num_workers=5))
         self.opt = Adam(diffusion_model.parameters(), lr=train_lr)
 
         self.step = 0
