@@ -627,7 +627,6 @@ class Trainer(object):
                     self.step_ema()
 
                 if self.step != 0 and self.step % self.save_and_sample_every == 0:
-                    print()
                     self.ema_model.eval()
 
                     milestone = self.step // self.save_and_sample_every
