@@ -460,7 +460,7 @@ class GaussianDiffusion(nn.Module):
         xt1, xt2 = map(lambda x: self.q_sample(x, t=t_batched), (x1, x2))
 
         img = (1 - lam) * xt1 + lam * xt2
-        for i in tqdm(reversed(range(0, t)), desc='interpolation sample time step', total=t):
+        for i in reversed(range(0, t)):
             img = self.p_sample(img, torch.full((b,), i, device=device, dtype=torch.long))
 
         return img
@@ -627,15 +627,18 @@ class Trainer(object):
                     self.step_ema()
 
                 if self.step != 0 and self.step % self.save_and_sample_every == 0:
+                    print()
                     self.ema_model.eval()
 
                     milestone = self.step // self.save_and_sample_every
                     batches = num_to_groups(36, self.batch_size)
                     all_images_list = list(map(lambda n: self.ema_model.sample(batch_size=n), batches))
                     all_images = torch.cat(all_images_list, dim=0)
-                    utils.save_image(all_images, str(self.results_folder / f'sample-{milestone}.png'), nrow = 6)
+                    img_save_path = str(self.results_folder / f'sample-{milestone}.png')
+                    utils.save_image(all_images, img_save_path, nrow = 6)
                     self.save(milestone)
-
+                    print(f"Sampled {img_save_path}")
+                    
                 self.step += 1
                 pbar.update(1)
 
