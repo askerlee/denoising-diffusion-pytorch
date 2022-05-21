@@ -255,7 +255,8 @@ class Unet(nn.Module):
         self.ups = nn.ModuleList([])
         num_resolutions = len(in_out)
 
-        use_linear_attn = False
+        # Using vanilla attention in encoder/decoder takes 16x RAM, and is slower.
+        use_linear_attn = True
         EncDecAttention = LinearAttention if use_linear_attn else Attention
 
         for ind, (dim_in, dim_out) in enumerate(in_out):
