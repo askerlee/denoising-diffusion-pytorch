@@ -90,8 +90,8 @@ def Upsample(dim):
 
 def Downsample(dim):
     return nn.Conv2d(dim, dim, 4, 2, 1)
-
 class LayerNorm(nn.Module):
+
     def __init__(self, dim, eps = 1e-5):
         super().__init__()
         self.eps = eps
@@ -114,7 +114,7 @@ class PreNorm(nn.Module):
         return self.fn(x)
 
 # building block modules
-
+# Block outputs a tensor in the same (H,W) size as the input.
 class Block(nn.Module):
     def __init__(self, dim, dim_out, groups = 8):
         super().__init__()
@@ -130,14 +130,16 @@ class ResnetBlock(nn.Module):
     def __init__(self, dim, dim_out, *, time_emb_dim = None, groups = 8):
         super().__init__()
         self.mlp = nn.Sequential(
-            nn.SiLU(),
+            nn.SiLU(),      # Sigmoid Linear Unit, aka swish. https://pytorch.org/docs/stable/_images/SiLU.png
             nn.Linear(time_emb_dim, dim_out)
         ) if exists(time_emb_dim) else None
 
+        # block1 and block2 use SiLU activation and group norm.
         self.block1 = Block(dim, dim_out, groups = groups)
         self.block2 = Block(dim_out, dim_out, groups = groups)
         self.res_conv = nn.Conv2d(dim, dim_out, 1) if dim != dim_out else nn.Identity()
 
+    # time embedding is incorporated between block1 and block2.
     def forward(self, x, time_emb = None):
         h = self.block1(x)
 
@@ -148,6 +150,7 @@ class ResnetBlock(nn.Module):
         h = self.block2(h)
         return h + self.res_conv(x)
 
+# LinearAttention doesn't do softmax on the Q*K similarity.
 class LinearAttention(nn.Module):
     def __init__(self, dim, heads = 4, dim_head = 32):
         super().__init__()
@@ -170,6 +173,7 @@ class LinearAttention(nn.Module):
         k = k.softmax(dim = -1)
 
         q = q * self.scale
+        # context is sim (without softmax) in Attention.
         context = torch.einsum('b h d n, b h e n -> b h d e', k, v)
 
         out = torch.einsum('b h d e, b h d n -> b h e n', context, q)
@@ -219,16 +223,20 @@ class Unet(nn.Module):
 
         self.channels = channels
 
+        # dim = 64, init_dim -> 42.
         init_dim = default(init_dim, dim // 3 * 2)
+        # image size doesn't change after init_conv, as default stride=1.
         self.init_conv = nn.Conv2d(channels, init_dim, 7, padding = 3)
 
+        # init_conv + 4 layers.
         dims = [init_dim, *map(lambda m: dim * m, dim_mults)]
+        # 4 pairs of layers in the encoder/decoder.
         in_out = list(zip(dims[:-1], dims[1:]))
 
         block_klass = partial(ResnetBlock, groups = resnet_block_groups)
 
         # time embeddings
-
+        # Fixed sinosudal embedding, transformed by two linear layers.
         if with_time_emb:
             time_dim = dim * 4
             self.time_mlp = nn.Sequential(
@@ -247,13 +255,20 @@ class Unet(nn.Module):
         self.ups = nn.ModuleList([])
         num_resolutions = len(in_out)
 
+        use_linear_attn = False
+        EncDecAttention = LinearAttention if use_linear_attn else Attention
+
         for ind, (dim_in, dim_out) in enumerate(in_out):
             is_last = ind >= (num_resolutions - 1)
 
             self.downs.append(nn.ModuleList([
-                block_klass(dim_in, dim_out, time_emb_dim = time_dim),
+                # A block_klass is a two-layer conv with residual connection. 
+                # block_klass doesn't downsample features.
+                block_klass(dim_in,  dim_out, time_emb_dim = time_dim),
                 block_klass(dim_out, dim_out, time_emb_dim = time_dim),
-                Residual(PreNorm(dim_out, LinearAttention(dim_out))),
+                # att(norm(x)) + x.
+                Residual(PreNorm(dim_out, EncDecAttention(dim_out))),
+                # downsampling is done with a 4x4 kernel, stride-2 conv.
                 Downsample(dim_out) if not is_last else nn.Identity()
             ]))
 
@@ -268,7 +283,7 @@ class Unet(nn.Module):
             self.ups.append(nn.ModuleList([
                 block_klass(dim_out * 2, dim_in, time_emb_dim = time_dim),
                 block_klass(dim_in, dim_in, time_emb_dim = time_dim),
-                Residual(PreNorm(dim_in, LinearAttention(dim_in))),
+                Residual(PreNorm(dim_in, EncDecAttention(dim_in))),
                 Upsample(dim_in) if not is_last else nn.Identity()
             ]))
 
@@ -509,6 +524,8 @@ class GaussianDiffusion(nn.Module):
     def forward(self, img, *args, **kwargs):
         b, c, h, w, device, img_size, = *img.shape, img.device, self.image_size
         assert h == img_size and w == img_size, f'height and width of image must be {img_size}'
+        # t: random numbers of steps between 0 and num_timesteps - 1 (num_timesteps default is 1000)
+        # (b,): different random steps for different images in a batch.
         t = torch.randint(0, self.num_timesteps, (b,), device=device).long()
 
         img = normalize_to_neg_one_to_one(img)
@@ -552,13 +569,14 @@ class Trainer(object):
         train_lr = 1e-4,
         train_num_steps = 100000,
         gradient_accumulate_every = 2,
-        amp = False,
+        amp = True,
         step_start_ema = 2000,
         update_ema_every = 10,
         save_and_sample_every = 1000,
         results_folder = './results'
     ):
         super().__init__()
+        # model: GaussianDiffusion instance.
         self.model = diffusion_model
         self.ema = EMA(ema_decay)
         self.ema_model = copy.deepcopy(self.model)
@@ -598,10 +616,10 @@ class Trainer(object):
 
     def save(self, milestone):
         data = {
-            'step': self.step,
-            'model': self.model.state_dict(),
-            'ema': self.ema_model.state_dict(),
-            'scaler': self.scaler.state_dict()
+            'step':     self.step,
+            'model':    self.model.state_dict(),
+            'ema':      self.ema_model.state_dict(),
+            'scaler':   self.scaler.state_dict()
         }
         torch.save(data, str(self.results_folder / f'model-{milestone}.pt'))
 
