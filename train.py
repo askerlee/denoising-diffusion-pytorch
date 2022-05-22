@@ -1,4 +1,4 @@
-from model import Unet, GaussianDiffusion
+from model import Unet, GaussianDiffusion, EMA, Dataset, cycle, num_to_groups
 import argparse
 import torch
 import torch.nn as nn
@@ -7,7 +7,6 @@ from torch.cuda.amp import autocast, GradScaler
 from torch.optim import Adam
 from torch.utils import data
 from torchvision import utils
-from utils import EMA, Dataset, cycle, num_to_groups
 import copy
 from tqdm import tqdm
 from pathlib import Path
