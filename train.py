@@ -124,6 +124,7 @@ class Trainer(object):
         print('training complete')
 
 parser = argparse.ArgumentParser()
+parser.add_argument('--lr', type=float, default=1e-4, help="Learning rate")
 parser.add_argument('--bs', type=int, default=32, help="Batch size")
 parser.add_argument('--gpus', type=int, nargs='+', default=[0, 1])
 parser.add_argument('--amp', default=True, action='store_false', help='Do not use mixed precision')
@@ -144,6 +145,7 @@ model = Unet(
     # with_time_emb = True, do time embedding.
 )
 
+# default using two GPUs.
 model = nn.DataParallel(model, device_ids=args.gpus)
 model.cuda()
 
@@ -158,8 +160,8 @@ diffusion = GaussianDiffusion(
 trainer = Trainer(
     diffusion,
     args.ds,                          # dataset path. Default: imagenet
-    train_batch_size = args.bs,
-    train_lr = 1e-4,
+    train_batch_size = args.bs,       # default: 32
+    train_lr = args.lr,               # default: 1e-4
     train_num_steps = 700000,         # total training steps
     gradient_accumulate_every = 2,    # gradient accumulation steps
     ema_decay = 0.995,                # exponential moving average decay
