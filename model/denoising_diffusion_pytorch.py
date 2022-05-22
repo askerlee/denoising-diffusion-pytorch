@@ -476,10 +476,10 @@ class GaussianDiffusion(nn.Module):
     def laploss(self, x_pred, x):
         lap_loss = self.laploss_fun(x_pred, x)
         l1_loss  = F.l1_loss(x_pred, x)
-        if torch.isnan(lap_loss):
+        if torch.isnan(lap_loss) or lap_loss > 100:
             return l1_loss
-        return 0.1 * lap_loss + 0.9 * l1_loss
-        
+        return 0.05 * lap_loss + 0.95 * l1_loss
+
     @property
     def loss_fn(self):
         if self.loss_type == 'l1':
