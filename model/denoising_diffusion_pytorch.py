@@ -353,7 +353,7 @@ class GaussianDiffusion(nn.Module):
         timesteps, = betas.shape
         self.num_timesteps = int(timesteps)
         self.loss_type = loss_type
-        self.laploss   = LapLoss()
+        self.laploss_fun    = LapLoss()
         
         # helper function to register buffer from float64 to float32
 
@@ -473,6 +473,13 @@ class GaussianDiffusion(nn.Module):
             extract(self.sqrt_one_minus_alphas_cumprod, t, x_start.shape) * noise
         )
 
+    def laploss(self, x_pred, x):
+        lap_loss = self.laploss_fun(x_pred, x)
+        l1_loss  = F.l1_loss(x_pred, x)
+        if torch.isnan(lap_loss):
+            return l1_loss
+        return 0.1 * lap_loss + 0.9 * l1_loss
+        
     @property
     def loss_fn(self):
         if self.loss_type == 'l1':
