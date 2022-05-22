@@ -1,21 +1,12 @@
 import math
-import copy
 import torch
 from torch import nn, einsum
 import torch.nn.functional as F
 from inspect import isfunction
 from functools import partial
 
-from torch.utils import data
-from torch.cuda.amp import autocast, GradScaler
-
-from pathlib import Path
-from torch.optim import Adam
-from torchvision import transforms, utils
-from PIL import Image
-
-from tqdm import tqdm
 from einops import rearrange
+from .laplacian import LapLoss
 
 # helpers functions
 
@@ -27,19 +18,6 @@ def default(val, d):
         return val
     return d() if isfunction(d) else d
 
-def cycle(dl):
-    while True:
-        for data in dl:
-            yield data
-
-def num_to_groups(num, divisor):
-    groups = num // divisor
-    remainder = num % divisor
-    arr = [divisor] * groups
-    if remainder > 0:
-        arr.append(remainder)
-    return arr
-
 def normalize_to_neg_one_to_one(img):
     return img * 2 - 1
 
@@ -47,21 +25,6 @@ def unnormalize_to_zero_to_one(t):
     return (t + 1) * 0.5
 
 # small helper modules
-
-class EMA():
-    def __init__(self, beta):
-        super().__init__()
-        self.beta = beta
-
-    def update_model_average(self, ma_model, current_model):
-        for current_params, ma_params in zip(current_model.parameters(), ma_model.parameters()):
-            old_weight, up_weight = ma_params.data, current_params.data
-            ma_params.data = self.update_average(old_weight, up_weight)
-
-    def update_average(self, old, new):
-        if old is None:
-            return new
-        return old * self.beta + (1 - self.beta) * new
 
 class Residual(nn.Module):
     def __init__(self, fn):
@@ -150,7 +113,8 @@ class ResnetBlock(nn.Module):
         h = self.block2(h)
         return h + self.res_conv(x)
 
-# LinearAttention doesn't do softmax on the Q*K similarity.
+# LinearAttention doesn't compute Q*K similarity (with softmax). 
+# Instead, it computes K*V as "context" (after K is softmax-ed).
 class LinearAttention(nn.Module):
     def __init__(self, dim, heads = 4, dim_head = 32):
         super().__init__()
@@ -169,17 +133,24 @@ class LinearAttention(nn.Module):
         qkv = self.to_qkv(x).chunk(3, dim = 1)
         q, k, v = map(lambda t: rearrange(t, 'b (h c) x y -> b h c (x y)', h = self.heads), qkv)
 
+        # q, k are softmax-ed, to ensure that q.k' is still row-normalized (sum to 1).
         q = q.softmax(dim = -2)
         k = k.softmax(dim = -1)
 
         q = q * self.scale
-        # context is sim (without softmax) in Attention.
+        # context: c*c, it's like c centroids, each of c-dim. 
+        # q is the weights ("soft membership") of each point belonging to each centroid. 
+        # Therefore, it's called "context" instead of "similarity". 
+        # Intuitively, it's more like doing clustering on V.
+        # https://arxiv.org/abs/1812.01243 Efficient Attention: Attention with Linear Complexities.
+        # In contrast, sim in Attention is N*N, with softmax.
         context = torch.einsum('b h d n, b h e n -> b h d e', k, v)
 
         out = torch.einsum('b h d e, b h d n -> b h e n', context, q)
         out = rearrange(out, 'b h c (x y) -> b (h c) x y', h = self.heads, x = h, y = w)
         return self.to_out(out)
 
+# Ordinary attention, without softmax.
 class Attention(nn.Module):
     def __init__(self, dim, heads = 4, dim_head = 32):
         super().__init__()
@@ -204,7 +175,6 @@ class Attention(nn.Module):
         return self.to_out(out)
 
 # model
-
 class Unet(nn.Module):
     def __init__(
         self,
@@ -225,7 +195,7 @@ class Unet(nn.Module):
 
         # dim = 64, init_dim -> 42.
         init_dim = default(init_dim, dim // 3 * 2)
-        # image size doesn't change after init_conv, as default stride=1.
+        # image size is the same after init_conv, as default stride=1.
         self.init_conv = nn.Conv2d(channels, init_dim, 7, padding = 3)
 
         # init_conv + 4 layers.
@@ -255,7 +225,7 @@ class Unet(nn.Module):
         self.ups = nn.ModuleList([])
         num_resolutions = len(in_out)
 
-        # Using vanilla attention in encoder/decoder takes 16x RAM, and is slower.
+        # Using vanilla attention in encoder/decoder takes 13x RAM, and is 3x slower.
         use_linear_attn = True
         EncDecAttention = LinearAttention if use_linear_attn else Attention
 
@@ -298,7 +268,7 @@ class Unet(nn.Module):
 
     def forward(self, x, time):
         x = self.init_conv(x)
-
+        # t: time embedding.
         t = self.time_mlp(time) if exists(self.time_mlp) else None
 
         h = []
@@ -328,6 +298,7 @@ class Unet(nn.Module):
 def extract(a, t, x_shape):
     b, *_ = t.shape
     out = a.gather(-1, t)
+    # out: [b, 1, 1, 1]
     return out.reshape(b, *((1,) * (len(x_shape) - 1)))
 
 def noise_like(shape, device, repeat=False):
@@ -370,7 +341,7 @@ class GaussianDiffusion(nn.Module):
 
         self.channels = channels
         self.image_size = image_size
-        self.denoise_fn = denoise_fn
+        self.denoise_fn = denoise_fn    # Unet
         self.objective = objective
 
         betas = cosine_beta_schedule(timesteps)
@@ -382,7 +353,8 @@ class GaussianDiffusion(nn.Module):
         timesteps, = betas.shape
         self.num_timesteps = int(timesteps)
         self.loss_type = loss_type
-
+        self.laploss   = LapLoss()
+        
         # helper function to register buffer from float64 to float32
 
         register_buffer = lambda name, val: self.register_buffer(name, val.to(torch.float32))
@@ -413,6 +385,8 @@ class GaussianDiffusion(nn.Module):
         register_buffer('posterior_mean_coef1', betas * torch.sqrt(alphas_cumprod_prev) / (1. - alphas_cumprod))
         register_buffer('posterior_mean_coef2', (1. - alphas_cumprod_prev) * torch.sqrt(alphas) / (1. - alphas_cumprod))
 
+    # subtract noise from noisy x_t, and get the denoised image. noise is expected to have standard std.
+    # sqrt_recipm1_alphas_cumprod_t scales the noise std to to the same std used to generate the noise.
     def predict_start_from_noise(self, x_t, t, noise):
         return (
             extract(self.sqrt_recip_alphas_cumprod, t, x_t.shape) * x_t -
@@ -444,6 +418,7 @@ class GaussianDiffusion(nn.Module):
         model_mean, posterior_variance, posterior_log_variance = self.q_posterior(x_start = x_start, x_t = x, t = t)
         return model_mean, posterior_variance, posterior_log_variance
 
+    # p_sample(), p_sample_loop(), sample() are used to do inference.
     @torch.no_grad()
     def p_sample(self, x, t, clip_denoised=True, repeat_noise=False):
         b, *_, device = *x.shape, x.device
@@ -488,10 +463,12 @@ class GaussianDiffusion(nn.Module):
 
         return img
 
+    # inject random noise into x_start. sqrt_one_minus_alphas_cumprod_t is the std of the noise.
     def q_sample(self, x_start, t, noise=None):
         noise = default(noise, lambda: torch.randn_like(x_start))
 
         return (
+            # t serves as a list of indices, to extract elements from sqrt_alphas_cumprod.
             extract(self.sqrt_alphas_cumprod, t, x_start.shape) * x_start +
             extract(self.sqrt_one_minus_alphas_cumprod, t, x_start.shape) * noise
         )
@@ -502,18 +479,29 @@ class GaussianDiffusion(nn.Module):
             return F.l1_loss
         elif self.loss_type == 'l2':
             return F.mse_loss
+        elif self.loss_type == 'lap':
+            return self.laploss
         else:
             raise ValueError(f'invalid loss type {self.loss_type}')
 
+    # x_start: initial image.
     def p_losses(self, x_start, t, noise = None):
         b, c, h, w = x_start.shape
+        # noise: a Gaussian noise for each pixel.
         noise = default(noise, lambda: torch.randn_like(x_start))
 
         x = self.q_sample(x_start=x_start, t=t, noise=noise)
         model_out = self.denoise_fn(x, t)
 
         if self.objective == 'pred_noise':
-            target = noise
+            if self.loss_type == 'lap':
+                target = x_start
+                # original model_out is predicted noise. Subtract it from noisy x to get the predicted x_start.
+                # LapLoss always compares the predicted x_start to the original x_start.
+                model_out = self.predict_start_from_noise(x, t, model_out)
+            else:
+                # Compare groundtruth noise vs. predicted noise.
+                target = noise
         elif self.objective == 'pred_x0':
             target = x_start
         else:
@@ -532,139 +520,3 @@ class GaussianDiffusion(nn.Module):
         img = normalize_to_neg_one_to_one(img)
         return self.p_losses(img, t, *args, **kwargs)
 
-# dataset classes
-
-class Dataset(data.Dataset):
-    def __init__(self, folder, image_size, exts = ['jpg', 'jpeg', 'png']):
-        super().__init__()
-        self.folder = folder
-        self.image_size = image_size
-        self.paths = [p for ext in exts for p in Path(f'{folder}').glob(f'**/*.{ext}')]
-
-        self.transform = transforms.Compose([
-            transforms.Resize(image_size),
-            transforms.RandomHorizontalFlip(),
-            transforms.CenterCrop(image_size),
-            transforms.ToTensor()
-        ])
-
-    def __len__(self):
-        return len(self.paths)
-
-    def __getitem__(self, index):
-        path = self.paths[index]
-        img = Image.open(path)
-        return self.transform(img)
-
-# trainer class
-
-class Trainer(object):
-    def __init__(
-        self,
-        diffusion_model,
-        folder,
-        *,
-        ema_decay = 0.995,
-        image_size = 128,
-        train_batch_size = 32,
-        train_lr = 1e-4,
-        train_num_steps = 100000,
-        gradient_accumulate_every = 2,
-        amp = True,
-        step_start_ema = 2000,
-        update_ema_every = 10,
-        save_and_sample_every = 1000,
-        results_folder = './results'
-    ):
-        super().__init__()
-        # model: GaussianDiffusion instance.
-        self.model = diffusion_model
-        self.ema = EMA(ema_decay)
-        self.ema_model = copy.deepcopy(self.model)
-        self.update_ema_every = update_ema_every
-
-        self.step_start_ema = step_start_ema
-        self.save_and_sample_every = save_and_sample_every
-
-        self.batch_size = train_batch_size
-        self.image_size = diffusion_model.image_size
-        self.gradient_accumulate_every = gradient_accumulate_every
-        self.train_num_steps = train_num_steps
-
-        self.ds = Dataset(folder, image_size)
-        self.dl = cycle(data.DataLoader(self.ds, batch_size = train_batch_size, shuffle=True, 
-                                        pin_memory=True, num_workers=5))
-        self.opt = Adam(diffusion_model.parameters(), lr=train_lr)
-
-        self.step = 0
-
-        self.amp = amp
-        self.scaler = GradScaler(enabled = amp)
-
-        self.results_folder = Path(results_folder)
-        self.results_folder.mkdir(exist_ok = True)
-
-        self.reset_parameters()
-
-    def reset_parameters(self):
-        self.ema_model.load_state_dict(self.model.state_dict())
-
-    def step_ema(self):
-        if self.step < self.step_start_ema:
-            self.reset_parameters()
-            return
-        self.ema.update_model_average(self.ema_model, self.model)
-
-    def save(self, milestone):
-        data = {
-            'step':     self.step,
-            'model':    self.model.state_dict(),
-            'ema':      self.ema_model.state_dict(),
-            'scaler':   self.scaler.state_dict()
-        }
-        torch.save(data, str(self.results_folder / f'model-{milestone}.pt'))
-
-    def load(self, milestone):
-        data = torch.load(str(self.results_folder / f'model-{milestone}.pt'))
-
-        self.step = data['step']
-        self.model.load_state_dict(data['model'])
-        self.ema_model.load_state_dict(data['ema'])
-        self.scaler.load_state_dict(data['scaler'])
-
-    def train(self):
-        with tqdm(initial = self.step, total = self.train_num_steps) as pbar:
-
-            while self.step < self.train_num_steps:
-                for i in range(self.gradient_accumulate_every):
-                    data = next(self.dl).cuda()
-
-                    with autocast(enabled = self.amp):
-                        loss = self.model(data)
-                        self.scaler.scale(loss / self.gradient_accumulate_every).backward()
-
-                    pbar.set_description(f'loss: {loss.item():.4f}')
-
-                self.scaler.step(self.opt)
-                self.scaler.update()
-                self.opt.zero_grad()
-
-                if self.step % self.update_ema_every == 0:
-                    self.step_ema()
-
-                if self.step != 0 and self.step % self.save_and_sample_every == 0:
-                    self.ema_model.eval()
-
-                    milestone = self.step // self.save_and_sample_every
-                    batches = num_to_groups(36, self.batch_size)
-                    all_images_list = list(map(lambda n: self.ema_model.sample(batch_size=n), batches))
-                    all_images = torch.cat(all_images_list, dim=0)
-                    img_save_path = str(self.results_folder / f'sample-{milestone}.png')
-                    utils.save_image(all_images, img_save_path, nrow = 6)
-                    self.save(milestone)
-                    print(f"Sampled {img_save_path}")
-
-                self.step += 1
-                pbar.update(1)
-
-        print('training complete')
