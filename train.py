@@ -1,4 +1,4 @@
-from model import Unet, GaussianDiffusion, Trainer
+from model import Unet, GaussianDiffusion
 import argparse
 import torch
 import torch.nn as nn
