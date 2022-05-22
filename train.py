@@ -136,7 +136,7 @@ parser.add_argument('--obj', dest='objective_type', type=str, choices=['pred_noi
                     help="Type of denoising objective")
 
 args = parser.parse_args()
-print("Args: \n", args)
+print(f"Args: \n{args}")
 
 model = Unet(
     dim = 64,
