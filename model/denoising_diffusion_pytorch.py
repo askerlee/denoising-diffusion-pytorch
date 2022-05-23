@@ -520,6 +520,9 @@ class GaussianDiffusion(nn.Module):
             raise ValueError(f'unknown objective {self.objective}')
 
         loss = self.loss_fn(model_out, target)
+        # It might helps early iterations when losses are unstable (occasionally very large).
+        if loss > 1:
+            loss = loss / loss.item()
         return loss
 
     def forward(self, img, *args, **kwargs):
