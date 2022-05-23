@@ -273,7 +273,7 @@ class Unet(nn.Module):
         # t: time embedding.
         if exists(self.time_mlp):
             t = self.time_mlp(time.flatten())
-            if time.ndim == 4:
+            if time.ndim == 3:
                 t = t.view(*(time.shape), -1)
             else:
                 # When do sampling, time is a 1-d tensor.
