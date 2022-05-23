@@ -108,7 +108,7 @@ class ResnetBlock(nn.Module):
         h = self.block1(x)
 
         if exists(self.mlp) and exists(time_emb):
-            time_emb = self.mlp(time_emb.squeeze(1)).permute(0, 3, 1, 2)
+            time_emb = self.mlp(time_emb).permute(0, 3, 1, 2)
             time_emb = time_emb.repeat_interleave(h.shape[2] // time_emb.shape[2], 2).repeat_interleave(h.shape[3] // time_emb.shape[3], 3)
             h = h + time_emb
 
@@ -271,7 +271,11 @@ class Unet(nn.Module):
     def forward(self, x, time):
         x = self.init_conv(x)
         # t: time embedding.
-        t = self.time_mlp(time) if exists(self.time_mlp) else None
+        if exists(self.time_mlp):
+            t = self.time_mlp(time.flatten())
+            t = t.view(*(time.shape), -1)
+        else:
+            t = None
 
         h = []
 
@@ -470,6 +474,7 @@ class GaussianDiffusion(nn.Module):
     # inject random noise into x_start. sqrt_one_minus_alphas_cumprod_t is the std of the noise.
     def q_sample(self, x_start, t, noise=None):
         noise = default(noise, lambda: torch.randn_like(x_start))
+        t = t.unsqueeze(1)
         # t serves as a tensor of indices, to extract elements from sqrt_alphas_cumprod.
         x_start_weight = extract(self.sqrt_alphas_cumprod, t.flatten(), x_start.shape).reshape(t.shape)
         noise_weight   = extract(self.sqrt_one_minus_alphas_cumprod, t.flatten(), x_start.shape).reshape(t.shape)
@@ -538,7 +543,7 @@ class GaussianDiffusion(nn.Module):
         assert h == img_size and w == img_size, f'height and width of image must be {img_size}'
         # t: random numbers of steps between 0 and num_timesteps - 1 (num_timesteps default is 1000)
         # (b,): different random steps for different images in a batch.
-        t = torch.randint(0, self.num_timesteps, (b, 1, self.noise_grid_num, self.noise_grid_num), 
+        t = torch.randint(0, self.num_timesteps, (b, self.noise_grid_num, self.noise_grid_num), 
                           device=device).long()
 
         img = normalize_to_neg_one_to_one(img)
