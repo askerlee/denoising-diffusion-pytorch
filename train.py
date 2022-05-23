@@ -135,6 +135,7 @@ parser.add_argument('--losstype', dest='loss_type', type=str, choices=['l1', 'l2
                     help="Type of image denoising loss")
 parser.add_argument('--obj', dest='objective_type', type=str, choices=['pred_noise', 'pred_x0'], default='pred_noise', 
                     help="Type of denoising objective")
+parser.add_argument('--noisegrid', dest='noise_grid_num', type=int, default=1, help="Number of noise grid per axis per image")
 
 args = parser.parse_args()
 print(f"Args: \n{args}")
@@ -155,6 +156,9 @@ diffusion = GaussianDiffusion(
     timesteps = args.timesteps,     # number of maximum diffusion steps
     loss_type = args.loss_type,     # lap (Laplacian), L1 or L2
     objective=args.objective_type,  # objective type, pred_noise or pred_x0
+    # noise_grid_num: default 1, same time t for a whole image. 
+    # If > 1, divide the image into N*N grids, and each grid has a separate t.
+    noise_grid_num=args.noise_grid_num, 
 ).cuda()
 
 trainer = Trainer(

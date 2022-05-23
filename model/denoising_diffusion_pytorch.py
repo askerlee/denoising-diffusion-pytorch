@@ -89,6 +89,7 @@ class Block(nn.Module):
     def forward(self, x):
         return self.block(x)
 
+# Different ResnetBlock's have different mlp (time embedding module).
 class ResnetBlock(nn.Module):
     def __init__(self, dim, dim_out, *, time_emb_dim = None, groups = 8):
         super().__init__()
