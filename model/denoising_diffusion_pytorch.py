@@ -277,7 +277,7 @@ class Unet(nn.Module):
                 t = t.view(*(time.shape), -1)
             else:
                 # When do sampling, time is a 1-d tensor.
-                t = t.view(time.shape[0], *((1,) * (len(x.shape) - 1)))
+                t = t.view(time.shape[0], *((1,) * (len(x.shape) - 2)), -1)
         else:
             t = None
 
