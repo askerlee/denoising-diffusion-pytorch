@@ -107,8 +107,9 @@ class ResnetBlock(nn.Module):
         h = self.block1(x)
 
         if exists(self.mlp) and exists(time_emb):
-            time_emb = self.mlp(time_emb)
-            h = rearrange(time_emb, 'b c -> b c 1 1') + h
+            time_emb = self.mlp(time_emb.squeeze(1)).permute(0, 3, 1, 2)
+            time_emb = time_emb.repeat_interleave(h.shape[2] // time_emb.shape[2], 2).repeat_interleave(h.shape[3] // time_emb.shape[3], 3)
+            h = h + time_emb
 
         h = self.block2(h)
         return h + self.res_conv(x)
