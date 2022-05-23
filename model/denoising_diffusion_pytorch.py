@@ -273,10 +273,13 @@ class Unet(nn.Module):
         # t: time embedding.
         if exists(self.time_mlp):
             t = self.time_mlp(time.flatten())
+            # When do training, time is 3-d [batch, h-grid, w-grid].
             if time.ndim == 3:
+                # t: [batch, h-grid, w-grid, time_dim=256].
                 t = t.view(*(time.shape), -1)
+            # When do sampling, time is 1-d [batch].
             else:
-                # When do sampling, time is a 1-d tensor.
+                # t: [batch, 1, 1, time_dim=256].
                 t = t.view(time.shape[0], *((1,) * (len(x.shape) - 2)), -1)
         else:
             t = None
