@@ -294,7 +294,7 @@ class Unet(nn.Module):
         return self.final_conv(x)
 
 # gaussian diffusion trainer class
-
+# suppose t is a 1-d tensor of indices.
 def extract(a, t, x_shape):
     b, *_ = t.shape
     out = a.gather(-1, t)
@@ -327,7 +327,8 @@ class GaussianDiffusion(nn.Module):
         channels = 3,
         timesteps = 1000,
         loss_type = 'l1',
-        objective = 'pred_noise'
+        objective = 'pred_noise',
+        noise_grid_num = 1
     ):
         super().__init__()
         if isinstance(denoise_fn, torch.nn.DataParallel):
@@ -343,6 +344,7 @@ class GaussianDiffusion(nn.Module):
         self.image_size = image_size
         self.denoise_fn = denoise_fn    # Unet
         self.objective = objective
+        self.noise_grid_num = noise_grid_num
 
         betas = cosine_beta_schedule(timesteps)
 
@@ -466,13 +468,16 @@ class GaussianDiffusion(nn.Module):
     # inject random noise into x_start. sqrt_one_minus_alphas_cumprod_t is the std of the noise.
     def q_sample(self, x_start, t, noise=None):
         noise = default(noise, lambda: torch.randn_like(x_start))
+        # t serves as a tensor of indices, to extract elements from sqrt_alphas_cumprod.
+        x_start_weight = extract(self.sqrt_alphas_cumprod, t.flatten(), x_start.shape).reshape(t.shape)
+        noise_weight   = extract(self.sqrt_one_minus_alphas_cumprod, t.flatten(), x_start.shape).reshape(t.shape)
+        # repeat noise weights and x_start weights to have the same size as x_start.
+        x_start_weight = x_start_weight.repeat_interleave(repeats = x_start.shape[2] // t.shape[2], dim = 2).repeat_interleave(repeats = x_start.shape[3] // t.shape[3], dim = 3)
+        noise_weight   = noise_weight.repeat_interleave(repeats = x_start.shape[2] // t.shape[2], dim = 2).repeat_interleave(repeats = x_start.shape[3] // t.shape[3], dim = 3)
 
-        return (
-            # t serves as a list of indices, to extract elements from sqrt_alphas_cumprod.
-            extract(self.sqrt_alphas_cumprod, t, x_start.shape) * x_start +
-            extract(self.sqrt_one_minus_alphas_cumprod, t, x_start.shape) * noise
-        )
+        return x_start_weight * x_start + noise_weight * noise
 
+    # LapLoss doesn't work.
     def laploss(self, x_pred, x):
         lap_loss = self.laploss_fun(x_pred, x)
         l1_loss  = F.l1_loss(x_pred, x)
@@ -506,6 +511,7 @@ class GaussianDiffusion(nn.Module):
         model_out = self.denoise_fn(x, t)
 
         if self.objective == 'pred_noise':
+            # Laplacian loss doesn't help. Instead, it makes convergence very slow.
             if self.loss_type == 'lap':
                 target = x_start
                 # original model_out is predicted noise. Subtract it from noisy x to get the predicted x_start.
@@ -520,7 +526,7 @@ class GaussianDiffusion(nn.Module):
             raise ValueError(f'unknown objective {self.objective}')
 
         loss = self.loss_fn(model_out, target)
-        # It might helps early iterations when losses are unstable (occasionally very large).
+        # Capping loss at 1 might helps early iterations when losses are unstable (occasionally very large).
         if loss > 1:
             loss = loss / loss.item()
         return loss
@@ -530,7 +536,8 @@ class GaussianDiffusion(nn.Module):
         assert h == img_size and w == img_size, f'height and width of image must be {img_size}'
         # t: random numbers of steps between 0 and num_timesteps - 1 (num_timesteps default is 1000)
         # (b,): different random steps for different images in a batch.
-        t = torch.randint(0, self.num_timesteps, (b,), device=device).long()
+        t = torch.randint(0, self.num_timesteps, (b, 1, self.noise_grid_num, self.noise_grid_num), 
+                          device=device).long()
 
         img = normalize_to_neg_one_to_one(img)
         return self.p_losses(img, t, *args, **kwargs)
