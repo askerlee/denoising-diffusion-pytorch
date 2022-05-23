@@ -136,6 +136,8 @@ parser.add_argument('--losstype', dest='loss_type', type=str, choices=['l1', 'l2
 parser.add_argument('--obj', dest='objective_type', type=str, choices=['pred_noise', 'pred_x0'], default='pred_noise', 
                     help="Type of denoising objective")
 parser.add_argument('--noisegrid', dest='noise_grid_num', type=int, default=1, help="Number of noise grid per axis per image")
+parser.add_argument('--sampinterval', dest='save_sample_interval', type=int, default=1000, 
+                    help="Every N iterations, save model and sample example images")
 
 args = parser.parse_args()
 print(f"Args: \n{args}")
@@ -170,7 +172,8 @@ trainer = Trainer(
     gradient_accumulate_every = 2,    # gradient accumulation steps
     ema_decay = 0.995,                # exponential moving average decay
     amp = args.amp,                   # turn on mixed precision. Default: True
-    results_folder = args.results_folder
+    results_folder = args.results_folder,
+    save_and_sample_every = args.save_sample_interval
 )
 
 trainer.train()
