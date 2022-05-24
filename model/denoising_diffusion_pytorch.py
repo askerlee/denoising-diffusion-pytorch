@@ -544,7 +544,6 @@ class GaussianDiffusion(nn.Module):
             noise_weight   = noise_weight.repeat_interleave(repeats = x_start.shape[2] // t.shape[2], dim = 2).repeat_interleave(repeats = x_start.shape[3] // t.shape[3], dim = 3)
         # if t has shape [1, 1], the it will be broadcasted to [b, c, h, w]. No need to repeat.
 
-        breakpoint()
         return x_start_weight * x_start + noise_weight * noise
 
     # LapLoss doesn't work.
