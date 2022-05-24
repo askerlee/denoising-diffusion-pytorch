@@ -24,6 +24,7 @@ def normalize_to_neg_one_to_one(img):
 def unnormalize_to_zero_to_one(t):
     return (t + 1) * 0.5
 
+# 5x faster than tensor.repeat_interleave().
 def repeat_interleave(x, n, dim):
     if dim < 0:
         dim += x.dim()
@@ -204,7 +205,6 @@ class Unet(nn.Module):
         with_time_emb = True,
         resnet_block_groups = 8,
         learned_variance = False,
-        do_distill = False,
     ):
         super().__init__()
 
@@ -279,8 +279,6 @@ class Unet(nn.Module):
                 Upsample(dim_in) if not is_last else nn.Identity()
             ]))
 
-        self.do_distill = do_distill
-
         for ind, (dim_in, dim_out) in enumerate(reversed(in_out[1:])):
             is_last = ind >= (num_resolutions - 1)
             # miniature image as teacher's priviliged information.
@@ -348,7 +346,8 @@ class Unet(nn.Module):
 
         pred_stu = self.final_conv(x)
 
-        if self.do_distill and img_gt is not None:
+        # img_gt is provided. Do distillation.
+        if img_gt is not None:
             x = mid_feat
             # A miniature image as teacher's priviliged information.
             img_gt = F.interpolate(img_gt, size=x.shape[2:], mode='bilinear', align_corners=False)
@@ -408,7 +407,8 @@ class GaussianDiffusion(nn.Module):
         timesteps = 1000,
         loss_type = 'l1',
         objective = 'pred_noise',
-        noise_grid_num = 1
+        noise_grid_num = 1,
+        do_distillation = False,
     ):
         super().__init__()
         if isinstance(denoise_fn, torch.nn.DataParallel):
@@ -425,6 +425,7 @@ class GaussianDiffusion(nn.Module):
         self.denoise_fn = denoise_fn    # Unet
         self.objective = objective
         self.noise_grid_num = noise_grid_num
+        self.do_distillation = do_distillation
 
         betas = cosine_beta_schedule(timesteps)
 
@@ -594,15 +595,16 @@ class GaussianDiffusion(nn.Module):
         noise = default(noise, lambda: torch.randn_like(x_start))
 
         x = self.q_sample(x_start=x_start, t=t, noise=noise)
-        model_out, _ = self.denoise_fn(x, t)
+        img_gt = x_start if self.do_distillation else None
+        pred_stu, pred_tea = self.denoise_fn(x, t, img_gt)
 
         if self.objective == 'pred_noise':
             # Laplacian loss doesn't help. Instead, it makes convergence very slow.
             if self.loss_type == 'lap':
                 target = x_start
-                # original model_out is predicted noise. Subtract it from noisy x to get the predicted x_start.
+                # original pred_stu is predicted noise. Subtract it from noisy x to get the predicted x_start.
                 # LapLoss always compares the predicted x_start to the original x_start.
-                model_out = self.predict_start_from_noise(x, t, model_out)
+                pred_stu = self.predict_start_from_noise(x, t, pred_stu)
             else:
                 # Compare groundtruth noise vs. predicted noise.
                 target = noise
@@ -611,7 +613,14 @@ class GaussianDiffusion(nn.Module):
         else:
             raise ValueError(f'unknown objective {self.objective}')
 
-        loss = self.loss_fn(model_out, target)
+        loss_stu = self.loss_fn(pred_stu, target)
+        if self.do_distillation:
+            loss_tea = self.loss_fn(pred_tea, target)
+        else:
+            loss_tea = 0
+        
+        loss = loss_stu + loss_tea
+
         # Capping loss at 1 might helps early iterations when losses are unstable (occasionally very large).
         if loss > 1:
             loss = loss / loss.item()

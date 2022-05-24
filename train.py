@@ -138,6 +138,10 @@ parser.add_argument('--obj', dest='objective_type', type=str, choices=['pred_noi
 parser.add_argument('--noisegrid', dest='noise_grid_num', type=int, default=1, help="Number of noise grid per axis per image")
 parser.add_argument('--sampinterval', dest='save_sample_interval', type=int, default=1000, 
                     help="Every N iterations, save model and sample example images")
+parser.add_argument('--distill', dest='do_distillation', action='store_true', 
+                    help='Use a miniature of original images as privileged information to train the teacher model, '
+                         'hopefully making the model converge faster')
+
 
 args = parser.parse_args()
 print(f"Args: \n{args}")
@@ -161,6 +165,8 @@ diffusion = GaussianDiffusion(
     # noise_grid_num: default 1, same time t for a whole image. 
     # If > 1, divide the image into N*N grids, and each grid has a separate t.
     noise_grid_num=args.noise_grid_num, 
+    # if do_distillation, use a miniature of original images as privileged information to train the teacher model.
+    do_distillation=args.do_distillation,   
 ).cuda()
 
 trainer = Trainer(
