@@ -292,7 +292,7 @@ class Unet(nn.Module):
         if exists(self.time_mlp):
             t = self.time_mlp(time.flatten())
             # When do training, time is 3-d [batch, h_grid, w_grid].
-            if time.ndim == 3:
+            if time.ndim == 3 and (time.shape[1] > 1 or time.shape[2] > 1):
                 # t: [batch, h_grid, w_grid, time_dim=256].
                 t = t.view(*(time.shape), -1)
             # When do sampling, time is 1-d [batch].
