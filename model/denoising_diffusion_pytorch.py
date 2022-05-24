@@ -53,8 +53,8 @@ def Upsample(dim):
 
 def Downsample(dim):
     return nn.Conv2d(dim, dim, 4, 2, 1)
-class LayerNorm(nn.Module):
 
+class LayerNorm(nn.Module):
     def __init__(self, dim, eps = 1e-5):
         super().__init__()
         self.eps = eps
@@ -77,7 +77,7 @@ class PreNorm(nn.Module):
         return self.fn(x)
 
 # building block modules
-# Block outputs a tensor in the same (H,W) size as the input.
+# No downsampling is done in Block, i.e., it outputs a tensor of the same (H,W) as the input.
 class Block(nn.Module):
     def __init__(self, dim, dim_out, groups = 8):
         super().__init__()
@@ -90,6 +90,7 @@ class Block(nn.Module):
         return self.block(x)
 
 # Different ResnetBlock's have different mlp (time embedding module).
+# No downsampling is done in ResnetBlock.
 class ResnetBlock(nn.Module):
     def __init__(self, dim, dim_out, *, time_emb_dim = None, groups = 8):
         super().__init__()
@@ -176,7 +177,7 @@ class Attention(nn.Module):
         out = rearrange(out, 'b h (x y) d -> b (h d) x y', x = h, y = w)
         return self.to_out(out)
 
-# model
+# denoising model
 class Unet(nn.Module):
     def __init__(
         self,
@@ -187,12 +188,12 @@ class Unet(nn.Module):
         channels = 3,
         with_time_emb = True,
         resnet_block_groups = 8,
-        learned_variance = False
+        learned_variance = False,
+        do_distill = False,
     ):
         super().__init__()
 
-        # determine dimensions
-
+        # number of input channels
         self.channels = channels
 
         # dim = 64, init_dim -> 42.
@@ -225,6 +226,9 @@ class Unet(nn.Module):
 
         self.downs = nn.ModuleList([])
         self.ups = nn.ModuleList([])
+        # ups_tea: teacher decoder
+        self.ups_tea = nn.ModuleList([])
+
         num_resolutions = len(in_out)
 
         # Using vanilla attention in encoder/decoder takes 13x RAM, and is 3x slower.
@@ -260,6 +264,20 @@ class Unet(nn.Module):
                 Upsample(dim_in) if not is_last else nn.Identity()
             ]))
 
+        self.do_distill = do_distill
+
+        for ind, (dim_in, dim_out) in enumerate(reversed(in_out[1:])):
+            is_last = ind >= (num_resolutions - 1)
+            # miniature image as teacher's priviliged information.
+            extra_in_dim = 3 if ind == 0 else 0
+
+            self.ups_tea.append(nn.ModuleList([
+                block_klass(dim_out * 2 + extra_in_dim, dim_in, time_emb_dim = time_dim),
+                block_klass(dim_in, dim_in, time_emb_dim = time_dim),
+                Residual(PreNorm(dim_in, EncDecAttention(dim_in))),
+                Upsample(dim_in) if not is_last else nn.Identity()
+            ]))
+
         default_out_dim = channels * (1 if not learned_variance else 2)
         self.out_dim = default(out_dim, default_out_dim)
 
@@ -268,14 +286,14 @@ class Unet(nn.Module):
             nn.Conv2d(dim, self.out_dim, 1)
         )
 
-    def forward(self, x, time):
+    def forward(self, x, time, img_gt=None):
         x = self.init_conv(x)
         # t: time embedding.
         if exists(self.time_mlp):
             t = self.time_mlp(time.flatten())
-            # When do training, time is 3-d [batch, h-grid, w-grid].
+            # When do training, time is 3-d [batch, h_grid, w_grid].
             if time.ndim == 3:
-                # t: [batch, h-grid, w-grid, time_dim=256].
+                # t: [batch, h_grid, w_grid, time_dim=256].
                 t = t.view(*(time.shape), -1)
             # When do sampling, time is 1-d [batch].
             else:
@@ -291,20 +309,54 @@ class Unet(nn.Module):
             x = block2(x, t)
             x = attn(x)
             h.append(x)
+            # All blocks above don't change feature resolution. Only downsample explicitly here.
+            # downsample() is a 4x4 conv, stride-2 conv.
             x = downsample(x)
 
+        # x: [16, 512, 16, 16], original image: 128x128, 1/8 of the original image.
+        # The last layer of the encoder doesn't have a downsampling layer, but has a dummy Identity() layer.
+        # So the original image is downsized by a factor of 2^3 = 8.
         x = self.mid_block1(x, t)
         x = self.mid_attn(x)
         x = self.mid_block2(x, t)
 
-        for block1, block2, attn, upsample in self.ups:
-            x = torch.cat((x, h.pop()), dim=1)
+        mid_feat = x
+
+        for ind, (block1, block2, attn, upsample) in enumerate(self.ups):
+            x = torch.cat((x, h[-ind-1]), dim=1)
             x = block1(x, t)
             x = block2(x, t)
             x = attn(x)
+            # All blocks above don't change feature resolution. Only upsample explicitly here.
+            # upsample() is a 4x4 conv, stride-2 transposed conv.
             x = upsample(x)
 
-        return self.final_conv(x)
+        pred_stu = self.final_conv(x)
+
+        if self.do_distill and img_gt is not None:
+            x = mid_feat
+            # A miniature image as teacher's priviliged information.
+            img_gt = F.interpolate(img_gt, size=x.shape[2:], mode='bilinear', align_corners=False)
+
+            for ind, (block1, block2, attn, upsample) in enumerate(self.ups_tea):
+                if ind == 0:
+                    x = torch.cat((x, h[-ind-1], img_gt), dim=1)
+                else:
+                    x = torch.cat((x, h[-ind-1]), dim=1)
+
+                x = block1(x, t)
+                x = block2(x, t)
+                x = attn(x)
+                # All blocks above don't change feature resolution. Only upsample explicitly here.
+                # upsample() is a 4x4 conv, stride-2 transposed conv.
+                x = upsample(x)
+
+            pred_tea = self.final_conv(x)
+
+        else:
+            pred_tea = None
+
+        return pred_stu, pred_tea
 
 # gaussian diffusion trainer class
 # suppose t is a 1-d tensor of indices.
@@ -418,7 +470,7 @@ class GaussianDiffusion(nn.Module):
         return posterior_mean, posterior_variance, posterior_log_variance_clipped
 
     def p_mean_variance(self, x, t, clip_denoised: bool):
-        model_output = self.denoise_fn(x, t)
+        model_output, _ = self.denoise_fn(x, t)
 
         if self.objective == 'pred_noise':
             x_start = self.predict_start_from_noise(x, t = t, noise = model_output)
@@ -522,7 +574,7 @@ class GaussianDiffusion(nn.Module):
         noise = default(noise, lambda: torch.randn_like(x_start))
 
         x = self.q_sample(x_start=x_start, t=t, noise=noise)
-        model_out = self.denoise_fn(x, t)
+        model_out, _ = self.denoise_fn(x, t)
 
         if self.objective == 'pred_noise':
             # Laplacian loss doesn't help. Instead, it makes convergence very slow.
