@@ -624,7 +624,7 @@ class GaussianDiffusion(nn.Module):
         # Capping loss at 1 might helps early iterations when losses are unstable (occasionally very large).
         if loss > 1:
             loss = loss / loss.item()
-        return loss
+        return {'loss': loss, 'loss_stu': loss_stu, 'loss_tea': loss_tea}
 
     def forward(self, img, *args, **kwargs):
         b, c, h, w, device, img_size, = *img.shape, img.device, self.image_size

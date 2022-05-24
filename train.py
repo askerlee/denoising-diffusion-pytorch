@@ -94,10 +94,16 @@ class Trainer(object):
                     data = next(self.dl).cuda()
 
                     with autocast(enabled = self.amp):
-                        loss = self.model(data)
+                        loss_dict = self.model(data)
+                        loss = loss_dict['loss']
                         self.scaler.scale(loss / self.gradient_accumulate_every).backward()
 
-                    pbar.set_description(f'loss: {loss.item():.4f}')
+                    if args.do_distillation:
+                        loss_stu = loss_dict['loss_stu']
+                        loss_tea = loss_dict['loss_tea']
+                        pbar.set_description(f'stu {loss_stu.item():.4f}, tea {loss_tea.item():.4f}')
+                    else:
+                        pbar.set_description(f'loss: {loss.item():.4f}')
 
                 self.scaler.step(self.opt)
                 self.scaler.update()
