@@ -537,10 +537,13 @@ class GaussianDiffusion(nn.Module):
         # t serves as a tensor of indices, to extract elements from sqrt_alphas_cumprod.
         x_start_weight = extract(self.sqrt_alphas_cumprod, t.flatten(), x_start.shape).reshape(t.shape)
         noise_weight   = extract(self.sqrt_one_minus_alphas_cumprod, t.flatten(), x_start.shape).reshape(t.shape)
-        # repeat noise weights and x_start weights to have the same size as x_start.
-        x_start_weight = x_start_weight.repeat_interleave(repeats = x_start.shape[2] // t.shape[2], dim = 2).repeat_interleave(repeats = x_start.shape[3] // t.shape[3], dim = 3)
-        noise_weight   = noise_weight.repeat_interleave(repeats = x_start.shape[2] // t.shape[2], dim = 2).repeat_interleave(repeats = x_start.shape[3] // t.shape[3], dim = 3)
 
+        if t.shape[2] > 1 or t.shape[3] > 1:
+            # repeat noise weights and x_start weights to have the same size as x_start.
+            x_start_weight = x_start_weight.repeat_interleave(repeats = x_start.shape[2] // t.shape[2], dim = 2).repeat_interleave(repeats = x_start.shape[3] // t.shape[3], dim = 3)
+            noise_weight   = noise_weight.repeat_interleave(repeats = x_start.shape[2] // t.shape[2], dim = 2).repeat_interleave(repeats = x_start.shape[3] // t.shape[3], dim = 3)
+        # if t has shape [1, 1], the it will be broadcasted to [b, c, h, w]. No need to repeat.
+        
         return x_start_weight * x_start + noise_weight * noise
 
     # LapLoss doesn't work.
@@ -602,8 +605,11 @@ class GaussianDiffusion(nn.Module):
         assert h == img_size and w == img_size, f'height and width of image must be {img_size}'
         # t: random numbers of steps between 0 and num_timesteps - 1 (num_timesteps default is 1000)
         # (b,): different random steps for different images in a batch.
-        t = torch.randint(0, self.num_timesteps, (b, self.noise_grid_num, self.noise_grid_num), 
-                          device=device).long()
+        if self.noise_grid_num > 1:
+            t = torch.randint(0, self.num_timesteps, (b, self.noise_grid_num, self.noise_grid_num), 
+                              device=device).long()
+        else:
+            t = torch.randint(0, self.num_timesteps, (b,), device=device).long()
 
         img = normalize_to_neg_one_to_one(img)
         return self.p_losses(img, t, *args, **kwargs)
