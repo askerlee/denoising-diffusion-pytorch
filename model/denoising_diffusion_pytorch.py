@@ -533,17 +533,17 @@ class GaussianDiffusion(nn.Module):
     # inject random noise into x_start. sqrt_one_minus_alphas_cumprod_t is the std of the noise.
     def q_sample(self, x_start, t, noise=None):
         noise = default(noise, lambda: torch.randn_like(x_start))
-        t = t.unsqueeze(1)
         # t serves as a tensor of indices, to extract elements from sqrt_alphas_cumprod.
         x_start_weight = extract(self.sqrt_alphas_cumprod, t.flatten(), x_start.shape).reshape(t.shape)
         noise_weight   = extract(self.sqrt_one_minus_alphas_cumprod, t.flatten(), x_start.shape).reshape(t.shape)
+        t = t.unsqueeze(1)
 
         if t.shape[2] > 1 or t.shape[3] > 1:
             # repeat noise weights and x_start weights to have the same size as x_start.
             x_start_weight = x_start_weight.repeat_interleave(repeats = x_start.shape[2] // t.shape[2], dim = 2).repeat_interleave(repeats = x_start.shape[3] // t.shape[3], dim = 3)
             noise_weight   = noise_weight.repeat_interleave(repeats = x_start.shape[2] // t.shape[2], dim = 2).repeat_interleave(repeats = x_start.shape[3] // t.shape[3], dim = 3)
         # if t has shape [1, 1], the it will be broadcasted to [b, c, h, w]. No need to repeat.
-        
+
         return x_start_weight * x_start + noise_weight * noise
 
     # LapLoss doesn't work.
