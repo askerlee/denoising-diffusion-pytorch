@@ -605,11 +605,8 @@ class GaussianDiffusion(nn.Module):
         assert h == img_size and w == img_size, f'height and width of image must be {img_size}'
         # t: random numbers of steps between 0 and num_timesteps - 1 (num_timesteps default is 1000)
         # (b,): different random steps for different images in a batch.
-        if self.noise_grid_num > 1:
-            t = torch.randint(0, self.num_timesteps, (b, self.noise_grid_num, self.noise_grid_num), 
-                              device=device).long()
-        else:
-            t = torch.randint(0, self.num_timesteps, (b,), device=device).long()
+        t = torch.randint(0, self.num_timesteps, (b, self.noise_grid_num, self.noise_grid_num), 
+                            device=device).long()
 
         img = normalize_to_neg_one_to_one(img)
         return self.p_losses(img, t, *args, **kwargs)
