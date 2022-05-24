@@ -110,7 +110,9 @@ class ResnetBlock(nn.Module):
 
         if exists(self.mlp) and exists(time_emb):
             time_emb = self.mlp(time_emb).permute(0, 3, 1, 2)
-            time_emb = time_emb.repeat_interleave(h.shape[2] // time_emb.shape[2], 2).repeat_interleave(h.shape[3] // time_emb.shape[3], 3)
+            if time_emb.shape[2] > 1 and time_emb.shape[3] > 1:
+                time_emb = time_emb.repeat_interleave(h.shape[2] // time_emb.shape[2], 2).repeat_interleave(h.shape[3] // time_emb.shape[3], 3)
+
             h = h + time_emb
 
         h = self.block2(h)
@@ -292,7 +294,7 @@ class Unet(nn.Module):
         if exists(self.time_mlp):
             t = self.time_mlp(time.flatten())
             # When do training, time is 3-d [batch, h_grid, w_grid].
-            if time.ndim == 3 and (time.shape[1] > 1 or time.shape[2] > 1):
+            if time.ndim == 3:
                 # t: [batch, h_grid, w_grid, time_dim=256].
                 t = t.view(*(time.shape), -1)
             # When do sampling, time is 1-d [batch].
