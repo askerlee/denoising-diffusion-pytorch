@@ -595,7 +595,15 @@ class GaussianDiffusion(nn.Module):
         noise = default(noise, lambda: torch.randn_like(x_start))
 
         x = self.q_sample(x_start=x_start, t=t, noise=noise)
-        img_gt = x_start if self.do_distillation else None
+        if self.do_distillation:
+            if self.objective == 'pred_noise':
+                img_gt = noise
+            elif self.objective == 'pred_x0':
+                img_gt = x_start
+            else:
+                breakpoint()
+        else:
+            img_gt = None
         pred_stu, pred_tea = self.denoise_fn(x, t, img_gt)
 
         if self.objective == 'pred_noise':
