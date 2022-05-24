@@ -24,6 +24,18 @@ def normalize_to_neg_one_to_one(img):
 def unnormalize_to_zero_to_one(t):
     return (t + 1) * 0.5
 
+def repeat_interleave(x, n, dim):
+    if dim < 0:
+        dim += x.dim()
+    x2 = x.unsqueeze(dim+1)
+    repeats = [1] * (len(x.shape) + 1)
+    repeats[dim+1] = n
+    new_shape = list(x.shape)
+    new_shape[dim] *= n
+    x_rep = x2.repeat(repeats)
+    x_new = x_rep.reshape(new_shape)
+    return x_new
+
 # small helper modules
 
 class Residual(nn.Module):
@@ -111,7 +123,8 @@ class ResnetBlock(nn.Module):
         if exists(self.mlp) and exists(time_emb):
             time_emb = self.mlp(time_emb).permute(0, 3, 1, 2)
             if time_emb.shape[2] > 1 and time_emb.shape[3] > 1:
-                time_emb = time_emb.repeat_interleave(h.shape[2] // time_emb.shape[2], 2).repeat_interleave(h.shape[3] // time_emb.shape[3], 3)
+                time_emb = repeat_interleave(repeat_interleave(time_emb, h.shape[2] // time_emb.shape[2], dim=2), 
+                                             h.shape[3] // time_emb.shape[3], dim=3)
 
             h = h + time_emb
 
@@ -542,8 +555,10 @@ class GaussianDiffusion(nn.Module):
 
         if t.shape[2] > 1 or t.shape[3] > 1:
             # repeat noise weights and x_start weights to have the same size as x_start.
-            x_start_weight = x_start_weight.repeat_interleave(repeats = x_start.shape[2] // t.shape[2], dim = 2).repeat_interleave(repeats = x_start.shape[3] // t.shape[3], dim = 3)
-            noise_weight   = noise_weight.repeat_interleave(repeats = x_start.shape[2] // t.shape[2], dim = 2).repeat_interleave(repeats = x_start.shape[3] // t.shape[3], dim = 3)
+            x_start_weight = repeat_interleave(repeat_interleave(x_start_weight, x_start.shape[2] // t.shape[2], dim=2), 
+                                               x_start.shape[3] // t.shape[3], dim=3)
+            noise_weight   = repeat_interleave(repeat_interleave(noise_weight, x_start.shape[2] // t.shape[2], dim = 2), 
+                                               x_start.shape[3] // t.shape[3], dim=3)
         # if t has shape [1, 1], the it will be broadcasted to [b, c, h, w]. No need to repeat.
 
         return x_start_weight * x_start + noise_weight * noise
