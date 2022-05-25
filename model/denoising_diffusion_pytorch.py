@@ -141,8 +141,10 @@ class LinearAttention(nn.Module):
         self.heads = heads
         hidden_dim = dim_head * heads
         self.memory_size = memory_size
-        # Persistent memory that serves as a codebook used for image generation.
-        self.memory = nn.Parameter(torch.zeros(1, dim, 1, memory_size))
+        if self.memory_size > 0:
+            # Persistent memory that serves as a codebook used for image generation.
+            self.memory = nn.Parameter(torch.zeros(1, dim, 1, memory_size))
+
         self.to_qkv = nn.Conv2d(dim, hidden_dim * 3, 1, bias = False)
 
         self.to_out = nn.Sequential(
@@ -153,7 +155,11 @@ class LinearAttention(nn.Module):
     def forward(self, x):
         b, c, h, w = x.shape
         x_flat = x.view(b, c, 1, h * w)
-        x_ext = torch.cat((x_flat, self.memory.expand(b, -1, -1, -1)), dim = 3)
+        if self.memory_size > 0:
+            x_ext = torch.cat((x_flat, self.memory.expand(b, -1, -1, -1)), dim = 3)
+        else:
+            x_ext = x_flat
+
         qkv = self.to_qkv(x_ext).chunk(3, dim = 1)
         q, k, v = map(lambda t: rearrange(t, 'b (h c) x y -> b h c (x y)', h = self.heads), qkv)
 
@@ -184,8 +190,9 @@ class Attention(nn.Module):
         self.heads = heads
         hidden_dim = dim_head * heads
         self.memory_size = memory_size
-        # Persistent memory that serves as a codebook used for image generation.
-        self.memory = nn.Parameter(torch.zeros(1, dim, 1, memory_size))
+        if self.memory_size > 0:
+            # Persistent memory that serves as a codebook used for image generation.
+            self.memory = nn.Parameter(torch.zeros(1, dim, 1, memory_size))
 
         self.to_qkv = nn.Conv2d(dim, hidden_dim * 3, 1, bias = False)
         self.to_out = nn.Conv2d(hidden_dim, dim, 1)
@@ -193,7 +200,10 @@ class Attention(nn.Module):
     def forward(self, x):
         b, c, h, w = x.shape
         x_flat = x.view(b, c, 1, h * w)
-        x_ext = torch.cat((x_flat, self.memory.expand(b, -1, -1, -1)), dim = 3)        
+        if self.memory_size > 0:
+            x_ext = torch.cat((x_flat, self.memory.expand(b, -1, -1, -1)), dim = 3)
+        else:
+            x_ext = x_flat    
 
         qkv = self.to_qkv(x_ext).chunk(3, dim = 1)
         q, k, v = map(lambda t: rearrange(t, 'b (h c) x y -> b h c (x y)', h = self.heads), qkv)
@@ -304,7 +314,7 @@ class Unet(nn.Module):
             self.ups_tea.append(nn.ModuleList([
                 block_klass(dim_out * 2 + extra_in_dim, dim_in, time_emb_dim = time_dim),
                 block_klass(dim_in, dim_in, time_emb_dim = time_dim),
-                Residual(PreNorm(dim_in, LinearAttention(dim_in))),
+                Residual(PreNorm(dim_in, LinearAttention(dim_in, memory_size=memory_size))),
                 Upsample(dim_in) if not is_last else nn.Identity()
             ]))
 
