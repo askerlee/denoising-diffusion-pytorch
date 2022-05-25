@@ -286,14 +286,14 @@ class Unet(nn.Module):
                 block_klass(dim_in,  dim_out, time_emb_dim = time_dim),
                 block_klass(dim_out, dim_out, time_emb_dim = time_dim),
                 # att(norm(x)) + x.
-                Residual(PreNorm(dim_out, LinearAttention(dim_out, memory_size=memory_size))),
+                Residual(PreNorm(dim_out, LinearAttention(dim_out, memory_size=0))),
                 # downsampling is done with a 4x4 kernel, stride-2 conv.
                 Downsample(dim_out) if not is_last else nn.Identity()
             ]))
 
         mid_dim = dims[-1]
         self.mid_block1 = block_klass(mid_dim, mid_dim, time_emb_dim = time_dim)
-        self.mid_attn = Residual(PreNorm(mid_dim, Attention(mid_dim, memory_size=memory_size)))
+        self.mid_attn = Residual(PreNorm(mid_dim, Attention(mid_dim, memory_size=0)))
         self.mid_block2 = block_klass(mid_dim, mid_dim, time_emb_dim = time_dim)
 
         for ind, (dim_in, dim_out) in enumerate(reversed(in_out[1:])):
