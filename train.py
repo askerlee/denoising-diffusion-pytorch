@@ -137,6 +137,8 @@ parser.add_argument('--amp', default=True, action='store_false', help='Do not us
 parser.add_argument('--ds', type=str, default='imagenet', help="The path of training dataset")
 parser.add_argument('--results_folder', type=str, default='results', help="The path to save checkpoints and sampled images")
 parser.add_argument('--timesteps', type=int, default=1000, help="Number of maximum diffusion steps")
+parser.add_argument('--mem', dest='memory_size', type=int, default=128, help="Number of memory cells in each attention layer")
+
 parser.add_argument('--losstype', dest='loss_type', type=str, choices=['l1', 'l2', 'lap'], default='l1', 
                     help="Type of image denoising loss")
 parser.add_argument('--obj', dest='objective_type', type=str, choices=['pred_noise', 'pred_x0'], default='pred_noise', 
@@ -154,8 +156,9 @@ print(f"Args: \n{args}")
 
 model = Unet(
     dim = 64,
-    dim_mults = (1, 2, 4, 8)
+    dim_mults = (1, 2, 4, 8),
     # with_time_emb = True, do time embedding.
+    memory_size = args.memory_size
 )
 
 # default using two GPUs.

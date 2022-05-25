@@ -1,1 +1,0 @@
-echo "f++ abc" | grep -E 'f++'

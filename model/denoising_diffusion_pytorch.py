@@ -142,7 +142,7 @@ class LinearAttention(nn.Module):
         hidden_dim = dim_head * heads
         self.memory_size = memory_size
         # Persistent memory that serves as a codebook used for image generation.
-        self.memory = nn.Parameter(torch.Tensor(1, dim, 1, memory_size))
+        self.memory = nn.Parameter(torch.zeros(1, dim, 1, memory_size))
         self.to_qkv = nn.Conv2d(dim, hidden_dim * 3, 1, bias = False)
 
         self.to_out = nn.Sequential(
@@ -185,7 +185,7 @@ class Attention(nn.Module):
         hidden_dim = dim_head * heads
         self.memory_size = memory_size
         # Persistent memory that serves as a codebook used for image generation.
-        self.memory = nn.Parameter(torch.Tensor(1, dim, 1, memory_size))
+        self.memory = nn.Parameter(torch.zeros(1, dim, 1, memory_size))
 
         self.to_qkv = nn.Conv2d(dim, hidden_dim * 3, 1, bias = False)
         self.to_out = nn.Conv2d(hidden_dim, dim, 1)
@@ -221,6 +221,7 @@ class Unet(nn.Module):
         channels = 3,
         with_time_emb = True,
         resnet_block_groups = 8,
+        memory_size = 128,
         learned_variance = False,
     ):
         super().__init__()
@@ -263,9 +264,8 @@ class Unet(nn.Module):
 
         num_resolutions = len(in_out)
 
+        # LinearAttention layers are used in encoder/decoder.
         # Using vanilla attention in encoder/decoder takes 13x RAM, and is 3x slower.
-        use_linear_attn = True
-        EncDecAttention = LinearAttention if use_linear_attn else Attention
 
         for ind, (dim_in, dim_out) in enumerate(in_out):
             is_last = ind >= (num_resolutions - 1)
@@ -276,14 +276,14 @@ class Unet(nn.Module):
                 block_klass(dim_in,  dim_out, time_emb_dim = time_dim),
                 block_klass(dim_out, dim_out, time_emb_dim = time_dim),
                 # att(norm(x)) + x.
-                Residual(PreNorm(dim_out, EncDecAttention(dim_out))),
+                Residual(PreNorm(dim_out, LinearAttention(dim_out, memory_size=memory_size))),
                 # downsampling is done with a 4x4 kernel, stride-2 conv.
                 Downsample(dim_out) if not is_last else nn.Identity()
             ]))
 
         mid_dim = dims[-1]
         self.mid_block1 = block_klass(mid_dim, mid_dim, time_emb_dim = time_dim)
-        self.mid_attn = Residual(PreNorm(mid_dim, Attention(mid_dim)))
+        self.mid_attn = Residual(PreNorm(mid_dim, Attention(mid_dim, memory_size=memory_size)))
         self.mid_block2 = block_klass(mid_dim, mid_dim, time_emb_dim = time_dim)
 
         for ind, (dim_in, dim_out) in enumerate(reversed(in_out[1:])):
@@ -292,7 +292,7 @@ class Unet(nn.Module):
             self.ups.append(nn.ModuleList([
                 block_klass(dim_out * 2, dim_in, time_emb_dim = time_dim),
                 block_klass(dim_in, dim_in, time_emb_dim = time_dim),
-                Residual(PreNorm(dim_in, EncDecAttention(dim_in))),
+                Residual(PreNorm(dim_in, LinearAttention(dim_in, memory_size=memory_size))),
                 Upsample(dim_in) if not is_last else nn.Identity()
             ]))
 
@@ -304,7 +304,7 @@ class Unet(nn.Module):
             self.ups_tea.append(nn.ModuleList([
                 block_klass(dim_out * 2 + extra_in_dim, dim_in, time_emb_dim = time_dim),
                 block_klass(dim_in, dim_in, time_emb_dim = time_dim),
-                Residual(PreNorm(dim_in, EncDecAttention(dim_in))),
+                Residual(PreNorm(dim_in, LinearAttention(dim_in))),
                 Upsample(dim_in) if not is_last else nn.Identity()
             ]))
 
