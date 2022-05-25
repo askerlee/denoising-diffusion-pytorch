@@ -143,7 +143,7 @@ class LinearAttention(nn.Module):
         self.memory_size = memory_size
         if self.memory_size > 0:
             # Persistent memory that serves as a codebook used for image generation.
-            self.memory = nn.Parameter(torch.zeros(1, dim, 1, memory_size))
+            self.memory = nn.Parameter(torch.randn(1, dim, 1, memory_size))
 
         self.to_qkv = nn.Conv2d(dim, hidden_dim * 3, 1, bias = False)
 
@@ -192,7 +192,7 @@ class Attention(nn.Module):
         self.memory_size = memory_size
         if self.memory_size > 0:
             # Persistent memory that serves as a codebook used for image generation.
-            self.memory = nn.Parameter(torch.zeros(1, dim, 1, memory_size))
+            self.memory = nn.Parameter(torch.randn(1, dim, 1, memory_size))
 
         self.to_qkv = nn.Conv2d(dim, hidden_dim * 3, 1, bias = False)
         self.to_out = nn.Conv2d(hidden_dim, dim, 1)
