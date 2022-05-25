@@ -135,11 +135,14 @@ class ResnetBlock(nn.Module):
 # LinearAttention doesn't compute Q*K similarity (with softmax). 
 # Instead, it computes K*V as "context" (after K is softmax-ed).
 class LinearAttention(nn.Module):
-    def __init__(self, dim, heads = 4, dim_head = 32):
+    def __init__(self, dim, heads = 4, dim_head = 32, memory_size=0):
         super().__init__()
         self.scale = dim_head ** -0.5
         self.heads = heads
         hidden_dim = dim_head * heads
+        self.memory_size = memory_size
+        # Persistent memory that serves as a codebook used for image generation.
+        self.memory = nn.Parameter(torch.Tensor(1, dim, 1, memory_size))
         self.to_qkv = nn.Conv2d(dim, hidden_dim * 3, 1, bias = False)
 
         self.to_out = nn.Sequential(
@@ -149,7 +152,9 @@ class LinearAttention(nn.Module):
 
     def forward(self, x):
         b, c, h, w = x.shape
-        qkv = self.to_qkv(x).chunk(3, dim = 1)
+        x_flat = x.view(b, c, 1, h * w)
+        x_ext = torch.cat((x_flat, self.memory.expand(b, -1, -1, -1)), dim = 3)
+        qkv = self.to_qkv(x_ext).chunk(3, dim = 1)
         q, k, v = map(lambda t: rearrange(t, 'b (h c) x y -> b h c (x y)', h = self.heads), qkv)
 
         # q, k are softmax-ed, to ensure that q.k' is still row-normalized (sum to 1).
@@ -166,22 +171,31 @@ class LinearAttention(nn.Module):
         context = torch.einsum('b h d n, b h e n -> b h d e', k, v)
 
         out = torch.einsum('b h d e, b h d n -> b h e n', context, q)
+        # Remove memory cells.
+        out = out[:, :, :, :h*w]
         out = rearrange(out, 'b h c (x y) -> b (h c) x y', h = self.heads, x = h, y = w)
         return self.to_out(out)
 
 # Ordinary attention, without softmax.
 class Attention(nn.Module):
-    def __init__(self, dim, heads = 4, dim_head = 32):
+    def __init__(self, dim, heads = 4, dim_head = 32, memory_size=0):
         super().__init__()
         self.scale = dim_head ** -0.5
         self.heads = heads
         hidden_dim = dim_head * heads
+        self.memory_size = memory_size
+        # Persistent memory that serves as a codebook used for image generation.
+        self.memory = nn.Parameter(torch.Tensor(1, dim, 1, memory_size))
+
         self.to_qkv = nn.Conv2d(dim, hidden_dim * 3, 1, bias = False)
         self.to_out = nn.Conv2d(hidden_dim, dim, 1)
 
     def forward(self, x):
         b, c, h, w = x.shape
-        qkv = self.to_qkv(x).chunk(3, dim = 1)
+        x_flat = x.view(b, c, 1, h * w)
+        x_ext = torch.cat((x_flat, self.memory.expand(b, -1, -1, -1)), dim = 3)        
+
+        qkv = self.to_qkv(x_ext).chunk(3, dim = 1)
         q, k, v = map(lambda t: rearrange(t, 'b (h c) x y -> b h c (x y)', h = self.heads), qkv)
         q = q * self.scale
 
@@ -190,6 +204,9 @@ class Attention(nn.Module):
         attn = sim.softmax(dim = -1)
 
         out = einsum('b h i j, b h d j -> b h i d', attn, v)
+        # Remove memory cells.
+        out = out[:, :, :h*w]
+
         out = rearrange(out, 'b h (x y) d -> b (h d) x y', x = h, y = w)
         return self.to_out(out)
 
@@ -597,9 +614,12 @@ class GaussianDiffusion(nn.Module):
         x = self.q_sample(x_start=x_start, t=t, noise=noise)
         if self.do_distillation:
             if self.objective == 'pred_noise':
-                img_gt = noise
+                # Using noise performs worse.
+                img_gt = x_start                
             elif self.objective == 'pred_x0':
-                img_gt = x_start
+                # Maybe better use noise here? Maybe if img_gt is different from the objective, 
+                # it helps train the teacher?
+                img_gt = x_start                
             else:
                 breakpoint()
         else:

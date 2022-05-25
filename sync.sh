@@ -1,0 +1,6 @@
+echo "172.20.117.215"
+rsync shaohua@172.20.117.215:denoising-diffusion-pytorch/results/'sample*png' /cygdrive/d/denoising/172.20.117.215-tea/ -aic 2>&1|grep -E "fcstp|f\\+\\+"
+echo "172.20.74.65"
+rsync shaohua@172.20.74.65:denoising-diffusion-pytorch/results/'sample*png' /cygdrive/d/denoising/172.20.74.65-tea/ -aic  2>&1|grep -E "fcstp|f\\+\\+"
+echo "10.2.18.238"
+rsync shaohua@10.2.18.238:denoising-diffusion-pytorch/results/'sample*png' /cygdrive/d/denoising/10.2.18.238-tea2/ -aic  2>&1|grep -E "fcstp|f\+\+"
