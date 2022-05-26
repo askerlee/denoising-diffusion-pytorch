@@ -95,7 +95,7 @@ class Trainer(object):
 
                     with autocast(enabled = self.amp):
                         loss_dict = self.model(data)
-                        loss = loss_dict['loss']
+                        loss = loss_dict['loss'].sum()
                         self.scaler.scale(loss / self.gradient_accumulate_every).backward()
 
                     if args.do_distillation:
