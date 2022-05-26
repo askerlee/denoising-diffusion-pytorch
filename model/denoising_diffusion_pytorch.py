@@ -45,7 +45,9 @@ class Residual(nn.Module):
         self.fn = fn
 
     def forward(self, x, *args, **kwargs):
-        return self.fn(x, *args, **kwargs) + x
+        # As residual connections are used in downs features of the UNet, 
+        # dividing by 2 keeps the std of these output features similar to ups features in the UNet.
+        return 0.5 * ( self.fn(x, *args, **kwargs) + x )
 
 class SinusoidalPosEmb(nn.Module):
     def __init__(self, dim):
@@ -112,7 +114,7 @@ class ResnetBlock(nn.Module):
             nn.Linear(time_emb_dim, dim_out)
         ) if exists(time_emb_dim) else None
 
-        # block1 and block2 use SiLU activation and group norm.
+        # block1 and block2 are ended with a group norm and a SiLU activation.
         self.block1 = Block(dim,     dim_out, kernel_size = kernel_size, groups = groups)
         self.block2 = Block(dim_out, dim_out, kernel_size = kernel_size, groups = groups)
         self.res_conv = nn.Conv2d(dim, dim_out, 1) if dim != dim_out else nn.Identity()
@@ -295,7 +297,7 @@ class Unet(nn.Module):
         mid_dim = dims[-1]
         self.mid_block1 = block_klass(mid_dim, mid_dim, time_emb_dim = time_dim)
         self.mid_attn   = Residual(PreNorm(mid_dim, Attention(mid_dim, memory_size=0)))
-        # Change kernel size from 3 to 1, to act similar as the MLP block in transformer.
+        # Seems setting kernel size to 1 leads to slightly worse images?
         self.mid_block2 = block_klass(mid_dim, mid_dim, kernel_size=1, time_emb_dim = time_dim)
 
         for ind, (dim_in, dim_out) in enumerate(reversed(in_out[1:])):
