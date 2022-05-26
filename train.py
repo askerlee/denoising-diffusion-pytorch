@@ -137,8 +137,10 @@ parser.add_argument('--gpus', type=int, nargs='+', default=[0, 1])
 parser.add_argument('--noamp', dest='amp', default=True, action='store_false', help='Do not use mixed precision')
 parser.add_argument('--ds', type=str, default='imagenet', help="The path of training dataset")
 parser.add_argument('--results_folder', type=str, default='results', help="The path to save checkpoints and sampled images")
-parser.add_argument('--times', dest='timesteps', type=int, default=1000, help="Number of maximum diffusion steps")
-parser.add_argument('--mem', dest='memory_size', type=int, default=128, help="Number of memory cells in each attention layer")
+parser.add_argument('--times', dest='timesteps', type=int, default=1000, 
+                    help="Number of maximum diffusion steps")
+parser.add_argument('--mem', dest='memory_size', type=int, default=1024, 
+                    help="Number of memory cells in each attention layer")
 
 parser.add_argument('--losstype', dest='loss_type', type=str, choices=['l1', 'l2', 'lap'], default='l1', 
                     help="Type of image denoising loss")
