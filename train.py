@@ -130,7 +130,7 @@ class Trainer(object):
         print('training complete')
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--lr', type=float, default=1e-4, help="Learning rate")
+parser.add_argument('--lr', type=float, default=2e-4, help="Learning rate")
 parser.add_argument('--bs', type=int, default=32, help="Batch size")
 parser.add_argument('--cp', type=str, dest='cp_path', default=None, help="The path of a model checkpoint")
 parser.add_argument('--sample', dest='sample_only', action='store_true', help='Do sampling using a trained model')
