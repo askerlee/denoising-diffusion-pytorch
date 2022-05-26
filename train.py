@@ -1,4 +1,4 @@
-from model import Unet, GaussianDiffusion, EMA, Dataset, cycle, num_to_groups, sample_images
+from model import Unet, GaussianDiffusion, EMA, Dataset, cycle, DataParallelPassthrough, sample_images
 import argparse
 import torch
 import torch.nn as nn
@@ -155,7 +155,7 @@ parser.add_argument('--distill', dest='do_distillation', action='store_true',
 
 
 args = parser.parse_args()
-print(f"Args: \n{args}")
+print(f"Args:\n{args}")
 
 unet = Unet(
     dim = 64,
@@ -165,7 +165,7 @@ unet = Unet(
 )
 
 diffusion = GaussianDiffusion(
-    unet,                          # denoise_fn
+    unet,                           # denoise_fn
     image_size = 128,               # Input image is resized to image_size before augmentation.
     timesteps = args.timesteps,     # number of maximum diffusion steps
     loss_type = args.loss_type,     # lap (Laplacian), L1 or L2
@@ -178,7 +178,7 @@ diffusion = GaussianDiffusion(
 )
 
 # default using two GPUs.
-diffusion = nn.DataParallel(diffusion, device_ids=args.gpus)
+diffusion = DataParallelPassthrough(diffusion, device_ids=args.gpus)
 diffusion.cuda()
 
 if args.cp_path is not None:

@@ -55,6 +55,13 @@ class EMA():
             return new
         return old * self.beta + (1 - self.beta) * new
 
+class DataParallelPassthrough(torch.nn.DataParallel):
+    def __getattr__(self, name):
+        try:
+            return super().__getattr__(name)
+        except AttributeError:
+            return getattr(self.module, name)
+            
 def sample_images(model, num_images, batch_size, img_save_path):
     batches = num_to_groups(num_images, batch_size)
     all_images_list = list(map(lambda n: model.sample(batch_size=n), batches))
