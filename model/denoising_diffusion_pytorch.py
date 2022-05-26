@@ -95,7 +95,7 @@ class Block(nn.Module):
     def __init__(self, dim, dim_out, kernel_size=3, groups = 8):
         super().__init__()
         self.block = nn.Sequential(
-            nn.Conv2d(dim, dim_out, kernel_size, padding = 1),
+            nn.Conv2d(dim, dim_out, kernel_size, padding = (kernel_size-1)//2 ),
             nn.GroupNorm(groups, dim_out),
             nn.SiLU()
         )

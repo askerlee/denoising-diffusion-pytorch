@@ -151,9 +151,9 @@ parser.add_argument('--obj', dest='objective_type', type=str, choices=['pred_noi
 parser.add_argument('--noisegrid', dest='noise_grid_num', type=int, default=1, help="Number of noise grid per axis per image")
 parser.add_argument('--sampinterval', dest='save_sample_interval', type=int, default=1000, 
                     help="Every N iterations, save model and sample example images")
-parser.add_argument('--distill', dest='do_distillation', action='store_true', 
-                    help='Use a miniature of original images as privileged information to train the teacher model, '
-                         'hopefully making the model converge faster')
+parser.add_argument('--nodistill', dest='do_distillation', action='store_false', 
+                    help='Distill: use a miniature of original images to train a teacher model, '
+                         'making the model converge faster. This option disables distillation.')
 
 
 args = parser.parse_args()
