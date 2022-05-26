@@ -96,12 +96,12 @@ class Trainer(object):
                     with autocast(enabled = self.amp):
                         loss_dict = self.model(data)
                         # For multiple GPUs, loss is a list.
-                        loss = loss_dict['loss'].sum()
+                        loss = loss_dict['loss'].mean()
                         self.scaler.scale(loss / self.gradient_accumulate_every).backward()
 
                     if args.do_distillation:
-                        loss_stu = loss_dict['loss_stu'].sum()
-                        loss_tea = loss_dict['loss_tea'].sum()
+                        loss_stu = loss_dict['loss_stu'].mean()
+                        loss_tea = loss_dict['loss_tea'].mean()
                         pbar.set_description(f'stu {loss_stu.item():.4f}, tea {loss_tea.item():.4f}')
                     else:
                         pbar.set_description(f'loss: {loss.item():.4f}')
