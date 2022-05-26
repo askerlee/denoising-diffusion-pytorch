@@ -89,13 +89,13 @@ class PreNorm(nn.Module):
         x = self.norm(x)
         return self.fn(x)
 
-# building block modules
+# building block modules. Kernel size is fixed as 3.
 # No downsampling is done in Block, i.e., it outputs a tensor of the same (H,W) as the input.
 class Block(nn.Module):
-    def __init__(self, dim, dim_out, groups = 8):
+    def __init__(self, dim, dim_out, kernel_size=3, groups = 8):
         super().__init__()
         self.block = nn.Sequential(
-            nn.Conv2d(dim, dim_out, 3, padding = 1),
+            nn.Conv2d(dim, dim_out, kernel_size, padding = 1),
             nn.GroupNorm(groups, dim_out),
             nn.SiLU()
         )
@@ -105,7 +105,7 @@ class Block(nn.Module):
 # Different ResnetBlock's have different mlp (time embedding module).
 # No downsampling is done in ResnetBlock.
 class ResnetBlock(nn.Module):
-    def __init__(self, dim, dim_out, *, time_emb_dim = None, groups = 8):
+    def __init__(self, dim, dim_out, *, kernel_size=3, time_emb_dim = None, groups = 8):
         super().__init__()
         self.mlp = nn.Sequential(
             nn.SiLU(),      # Sigmoid Linear Unit, aka swish. https://pytorch.org/docs/stable/_images/SiLU.png
@@ -113,8 +113,8 @@ class ResnetBlock(nn.Module):
         ) if exists(time_emb_dim) else None
 
         # block1 and block2 use SiLU activation and group norm.
-        self.block1 = Block(dim, dim_out, groups = groups)
-        self.block2 = Block(dim_out, dim_out, groups = groups)
+        self.block1 = Block(dim,     dim_out, kernel_size = kernel_size, groups = groups)
+        self.block2 = Block(dim_out, dim_out, kernel_size = kernel_size, groups = groups)
         self.res_conv = nn.Conv2d(dim, dim_out, 1) if dim != dim_out else nn.Identity()
 
     # time embedding is incorporated between block1 and block2.
@@ -294,8 +294,9 @@ class Unet(nn.Module):
 
         mid_dim = dims[-1]
         self.mid_block1 = block_klass(mid_dim, mid_dim, time_emb_dim = time_dim)
-        self.mid_attn = Residual(PreNorm(mid_dim, Attention(mid_dim, memory_size=0)))
-        self.mid_block2 = block_klass(mid_dim, mid_dim, time_emb_dim = time_dim)
+        self.mid_attn   = Residual(PreNorm(mid_dim, Attention(mid_dim, memory_size=0)))
+        # Change kernel size from 3 to 1, to act similar as the MLP block in transformer.
+        self.mid_block2 = block_klass(mid_dim, mid_dim, kernel_size=1, time_emb_dim = time_dim)
 
         for ind, (dim_in, dim_out) in enumerate(reversed(in_out[1:])):
             is_last = ind >= (num_resolutions - 1)
@@ -359,6 +360,8 @@ class Unet(nn.Module):
         # So the original image is downsized by a factor of 2^3 = 8.
         x = self.mid_block1(x, t)
         x = self.mid_attn(x)
+        # mid_attn followed by mid_block2 (ResnetBlock), is equivalent to a full transformer layer
+        # mid_block2 takes the role of MLP in the transformer.
         x = self.mid_block2(x, t)
 
         mid_feat = x

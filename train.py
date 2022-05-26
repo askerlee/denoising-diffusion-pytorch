@@ -96,6 +96,8 @@ class Trainer(object):
                     with autocast(enabled = self.amp):
                         loss_dict = self.model(data)
                         # For multiple GPUs, loss is a list.
+                        # Since the loss on each GPU is MAE per pixel, we should also average them here,
+                        # to make the loss consistent with being on a single GPU.
                         loss = loss_dict['loss'].mean()
                         self.scaler.scale(loss / self.gradient_accumulate_every).backward()
 
