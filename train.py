@@ -1,4 +1,4 @@
-from model import Unet, GaussianDiffusion, EMA, Dataset, cycle, num_to_groups
+from model import Unet, GaussianDiffusion, EMA, Dataset, cycle, num_to_groups, sample_images
 import argparse
 import torch
 import torch.nn as nn
@@ -7,6 +7,7 @@ from torch.cuda.amp import autocast, GradScaler
 from torch.optim import Adam
 from torch.utils import data
 from torchvision import utils
+import os
 import copy
 from tqdm import tqdm
 from pathlib import Path
@@ -113,16 +114,13 @@ class Trainer(object):
                     self.step_ema()
 
                 if self.step != 0 and self.step % self.save_and_sample_every == 0:
+                    # ema_model: GaussianDiffusion
                     self.ema_model.eval()
 
                     milestone = self.step // self.save_and_sample_every
-                    batches = num_to_groups(36, self.batch_size)
-                    all_images_list = list(map(lambda n: self.ema_model.sample(batch_size=n), batches))
-                    all_images = torch.cat(all_images_list, dim=0)
                     img_save_path = str(self.results_folder / f'sample-{milestone}.png')
-                    utils.save_image(all_images, img_save_path, nrow = 6)
                     self.save(milestone)
-                    print(f"Sampled {img_save_path}")
+                    sample_images(self.ema_model, 36, self.batch_size, img_save_path)               
 
                 self.step += 1
                 pbar.update(1)
@@ -132,11 +130,14 @@ class Trainer(object):
 parser = argparse.ArgumentParser()
 parser.add_argument('--lr', type=float, default=1e-4, help="Learning rate")
 parser.add_argument('--bs', type=int, default=32, help="Batch size")
+parser.add_argument('--cp', type=str, dest='cp_path', default=None, help="The path of a model checkpoint")
+parser.add_argument('--sample', dest='sample_only', action='store_true', help='Do sampling using a trained model')
+
 parser.add_argument('--gpus', type=int, nargs='+', default=[0, 1])
-parser.add_argument('--amp', default=True, action='store_false', help='Do not use mixed precision')
+parser.add_argument('--noamp', default=True, action='store_false', help='Do not use mixed precision')
 parser.add_argument('--ds', type=str, default='imagenet', help="The path of training dataset")
 parser.add_argument('--results_folder', type=str, default='results', help="The path to save checkpoints and sampled images")
-parser.add_argument('--timesteps', type=int, default=1000, help="Number of maximum diffusion steps")
+parser.add_argument('--times', dest='timesteps', type=int, default=1000, help="Number of maximum diffusion steps")
 parser.add_argument('--mem', dest='memory_size', type=int, default=128, help="Number of memory cells in each attention layer")
 
 parser.add_argument('--losstype', dest='loss_type', type=str, choices=['l1', 'l2', 'lap'], default='l1', 
@@ -154,19 +155,15 @@ parser.add_argument('--distill', dest='do_distillation', action='store_true',
 args = parser.parse_args()
 print(f"Args: \n{args}")
 
-model = Unet(
+unet = Unet(
     dim = 64,
     dim_mults = (1, 2, 4, 8),
     # with_time_emb = True, do time embedding.
     memory_size = args.memory_size
 )
 
-# default using two GPUs.
-model = nn.DataParallel(model, device_ids=args.gpus)
-model.cuda()
-
 diffusion = GaussianDiffusion(
-    model,                          # denoise_fn
+    unet,                          # denoise_fn
     image_size = 128,               # Input image is resized to image_size before augmentation.
     timesteps = args.timesteps,     # number of maximum diffusion steps
     loss_type = args.loss_type,     # lap (Laplacian), L1 or L2
@@ -176,7 +173,20 @@ diffusion = GaussianDiffusion(
     noise_grid_num=args.noise_grid_num, 
     # if do_distillation, use a miniature of original images as privileged information to train the teacher model.
     do_distillation=args.do_distillation,   
-).cuda()
+)
+
+# default using two GPUs.
+diffusion = nn.DataParallel(diffusion, device_ids=args.gpus)
+diffusion.cuda()
+
+if args.cp_path is not None:
+    diffusion.load_state_dict(torch.load(args.cp_path)['ema'])
+
+if args.sample_only:
+    assert args.cp_path is not None, "Please specify a checkpoint path to load for sampling"
+    cp_trunk = os.path.basename(args.cp_path).split('.')[0]
+    sample_images(diffusion, 36, args.bs, str(args.results_folder / f'{cp_trunk}-sample.png'))
+    exit()
 
 trainer = Trainer(
     diffusion,
@@ -188,7 +198,7 @@ trainer = Trainer(
     ema_decay = 0.995,                # exponential moving average decay
     amp = args.amp,                   # turn on mixed precision. Default: True
     results_folder = args.results_folder,
-    save_and_sample_every = args.save_sample_interval
+    save_and_sample_every = args.save_sample_interval,
 )
 
 trainer.train()

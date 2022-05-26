@@ -286,6 +286,7 @@ class Unet(nn.Module):
                 block_klass(dim_in,  dim_out, time_emb_dim = time_dim),
                 block_klass(dim_out, dim_out, time_emb_dim = time_dim),
                 # att(norm(x)) + x.
+                # Seems adding memory to encoder hurts performance: image features poluted by memory?
                 Residual(PreNorm(dim_out, LinearAttention(dim_out, memory_size=0))),
                 # downsampling is done with a 4x4 kernel, stride-2 conv.
                 Downsample(dim_out) if not is_last else nn.Identity()

@@ -1,3 +1,4 @@
+import torch
 from torch.utils import data
 from torchvision import transforms, utils
 from pathlib import Path
@@ -53,3 +54,11 @@ class EMA():
         if old is None:
             return new
         return old * self.beta + (1 - self.beta) * new
+
+def sample_images(model, num_images, batch_size, img_save_path):
+    batches = num_to_groups(num_images, batch_size)
+    all_images_list = list(map(lambda n: model.sample(batch_size=n), batches))
+    all_images = torch.cat(all_images_list, dim=0)
+    utils.save_image(all_images, img_save_path, nrow = 6)
+    print(f"Sampled {img_save_path}")
+        
