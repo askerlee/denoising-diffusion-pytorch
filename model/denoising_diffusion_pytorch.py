@@ -9,8 +9,9 @@ from einops import rearrange
 from .laplacian import LapLoss
 import timm
 
-timm_model2dim = { 'efficientnet_b0': 1280, 'resnet34': 512,
-                   'resnet18': 512 }
+timm_model2dim = { 'resnet34': 512,
+                   'resnet18': 512,
+                   'repvgg_b0': 1280 }
 
 # helpers functions
 
@@ -316,8 +317,10 @@ class Unet(nn.Module):
             ]))
 
         self.distillation_type = distillation_type
-        if self.distillation_type == 'imgfeat':
-            self.distill_feat_extractor_type = 'efficientnet_b0'    # 'resnet34'
+        if self.distillation_type != 'none' and self.distillation_type != 'mini':
+            # Tried 'efficientnet_b0', but it doesn't perform well.
+            # 'resnet34', 'resnet18', 'repvgg_b0'
+            self.distill_feat_extractor_type = self.distillation_type 
             self.distill_feat_dim            = timm_model2dim[self.distill_feat_extractor_type]
             self.distill_feat_extractor      = timm.create_model(self.distill_feat_extractor_type, pretrained=True)
         else:
@@ -327,7 +330,7 @@ class Unet(nn.Module):
             is_last = ind >= (num_resolutions - 1)
             # miniature image / image features as teacher's priviliged information.
             if ind == 0:
-                if self.distillation_type == 'imgfeat':
+                if self.distillation_type != 'none' and self.distillation_type != 'mini':
                     # number of output features from the image feature extractor.
                     extra_in_dim = self.distill_feat_dim
                 else:
@@ -402,15 +405,17 @@ class Unet(nn.Module):
         # img_gt is provided. Do distillation.
         if img_gt is not None:
             x = mid_feat
-            if self.distillation_type == 'imgfeat':
+            if self.distillation_type != 'none' and self.distillation_type != 'mini':
                 # For 128x128 images, features are 4x4. Resize to 16x16.
                 gt_info = self.distill_feat_extractor.forward_features(img_gt)
                 gt_info = F.interpolate(gt_info, size=x.shape[2:], mode='bilinear', align_corners=False)
-            else:
+            elif self.distillation_type == 'mini':
                 # A miniature image as teacher's priviliged information. 
                 # Resize 128x128 images to 16x16.
                 gt_info = F.interpolate(img_gt, size=x.shape[2:], mode='bilinear', align_corners=False)
-
+            else:
+                breakpoint()
+                
             for ind, (block1, block2, attn, upsample) in enumerate(self.ups_tea):
                 if ind == 0:
                     x = torch.cat((x, h[-ind-1], gt_info), dim=1)

@@ -151,10 +151,9 @@ parser.add_argument('--obj', dest='objective_type', type=str, choices=['pred_noi
 parser.add_argument('--noisegrid', dest='noise_grid_num', type=int, default=1, help="Number of noise grid per axis per image")
 parser.add_argument('--sampinterval', dest='save_sample_interval', type=int, default=1000, 
                     help="Every N iterations, save model and sample example images")
-parser.add_argument('--distill', dest='distillation_type', choices=['none', 'miniature', 'imgfeat'], default='none', 
-                    help='Distill: use a miniature of original images to train a teacher model, '
-                         'making the model converge faster. This option disables distillation.')
-
+parser.add_argument('--distill', dest='distillation_type', choices=['none', 'mini', 'resnet34', 'resnet18', 'repvgg_b0'], 
+                    default='none', help='Distill: use a miniature or features of original images to train a teacher model, '
+                         'making the model converge faster.')
 
 args = parser.parse_args()
 print(f"Args:\n{args}")
@@ -164,8 +163,9 @@ unet = Unet(
     dim_mults = (1, 2, 4, 8),
     # with_time_emb = True, do time embedding.
     memory_size = args.memory_size,
-    # if distillation_type=='miniature', use a miniature of original images as privileged information to train the teacher model.
-    # if distillation_type=='imgfeat', use image features extracted with a pretrained model to train the teacher model.
+    # if distillation_type=='mini', use a miniature of original images as privileged information to train the teacher model.
+    # if distillation_type=='resnet34' or another model name, 
+    # use image features extracted with a pretrained model to train the teacher model.
     distillation_type = args.distillation_type
 )
 
@@ -178,8 +178,9 @@ diffusion = GaussianDiffusion(
     # noise_grid_num: default 1, same time t for a whole image. 
     # If > 1, divide the image into N*N grids, and each grid has a separate t.
     noise_grid_num=args.noise_grid_num, 
-    # if distillation_type=='miniature', use a miniature of original images as privileged information to train the teacher model.
-    # if distillation_type=='imgfeat', use image features extracted with a pretrained model to train the teacher model.
+    # if distillation_type=='mini', use a miniature of original images as privileged information to train the teacher model.
+    # if distillation_type=='resnet34' or another model name, 
+    # use image features extracted with a pretrained model to train the teacher model.
     distillation_type=args.distillation_type,   
 )
 
