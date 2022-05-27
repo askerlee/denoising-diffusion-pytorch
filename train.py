@@ -151,7 +151,8 @@ parser.add_argument('--obj', dest='objective_type', type=str, choices=['pred_noi
 parser.add_argument('--noisegrid', dest='noise_grid_num', type=int, default=1, help="Number of noise grid per axis per image")
 parser.add_argument('--sampinterval', dest='save_sample_interval', type=int, default=1000, 
                     help="Every N iterations, save model and sample example images")
-parser.add_argument('--distill', dest='distillation_type', choices=['none', 'mini', 'resnet34', 'resnet18', 'repvgg_b0'], 
+parser.add_argument('--distill', dest='distillation_type', 
+                    choices=['none', 'mini', 'resnet34', 'resnet18', 'repvgg_b0', 'mobilenetv2_120d', 'vit_base_patch8_224'], 
                     default='none', help='Distill: use a miniature or features of original images to train a teacher model, '
                          'making the model converge faster.')
 parser.add_argument('--nodistillsg', dest='distill_feat_stop_grad', default=True, action='store_false', 
