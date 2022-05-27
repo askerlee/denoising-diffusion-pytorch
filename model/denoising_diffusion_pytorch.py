@@ -7,6 +7,7 @@ from functools import partial
 
 from einops import rearrange
 from .laplacian import LapLoss
+import timm
 
 # helpers functions
 
@@ -233,8 +234,9 @@ class Unet(nn.Module):
         channels = 3,
         with_time_emb = True,
         resnet_block_groups = 8,
-        memory_size = 128,
+        memory_size = 1024,
         learned_variance = False,
+        distillation_type = 'none'
     ):
         super().__init__()
 
@@ -310,10 +312,23 @@ class Unet(nn.Module):
                 Upsample(dim_in) if not is_last else nn.Identity()
             ]))
 
+        self.distillation_type = distillation_type
+        if self.distillation_type == 'imgfeat':
+            self.imgfeat_model = timm.get_model('resnet34', pretrained=True)
+        else:
+            self.imgfeat_model = None
+            
         for ind, (dim_in, dim_out) in enumerate(reversed(in_out[1:])):
             is_last = ind >= (num_resolutions - 1)
-            # miniature image as teacher's priviliged information.
-            extra_in_dim = 3 if ind == 0 else 0
+            # miniature image / image features as teacher's priviliged information.
+            if ind == 0:
+                if self.distillation_type == 'imgfeat':
+                    # resnet34 output features.
+                    extra_in_dim = 512
+                else:
+                    extra_in_dim = 3
+            else:
+                extra_in_dim = 0
 
             self.ups_tea.append(nn.ModuleList([
                 block_klass(dim_out * 2 + extra_in_dim, dim_in, time_emb_dim = time_dim),
@@ -382,12 +397,18 @@ class Unet(nn.Module):
         # img_gt is provided. Do distillation.
         if img_gt is not None:
             x = mid_feat
-            # A miniature image as teacher's priviliged information.
-            img_gt = F.interpolate(img_gt, size=x.shape[2:], mode='bilinear', align_corners=False)
+            if self.distillation_type == 'imgfeat':
+                # For 128x128 images, features are 4x4. Resize to 16x16.
+                gt_info = self.imgfeat_model(img_gt)
+                gt_info = F.interpolate(gt_info, size=x.shape[2:], mode='bilinear', align_corners=False)
+            else:
+                # A miniature image as teacher's priviliged information. 
+                # Resize 128x128 images to 16x16.
+                gt_info = F.interpolate(img_gt, size=x.shape[2:], mode='bilinear', align_corners=False)
 
             for ind, (block1, block2, attn, upsample) in enumerate(self.ups_tea):
                 if ind == 0:
-                    x = torch.cat((x, h[-ind-1], img_gt), dim=1)
+                    x = torch.cat((x, h[-ind-1], gt_info), dim=1)
                 else:
                     x = torch.cat((x, h[-ind-1]), dim=1)
 
@@ -407,7 +428,7 @@ class Unet(nn.Module):
 
 # gaussian diffusion trainer class
 # suppose t is a 1-d tensor of indices.
-def extract(a, t, x_shape):
+def extract_tensor(a, t, x_shape):
     b, *_ = t.shape
     out = a.gather(-1, t)
     # out: [b, 1, 1, 1]
@@ -441,7 +462,7 @@ class GaussianDiffusion(nn.Module):
         loss_type = 'l1',
         objective = 'pred_noise',
         noise_grid_num = 1,
-        do_distillation = False,
+        distillation_type = 'none',
     ):
         super().__init__()
         if isinstance(denoise_fn, torch.nn.DataParallel):
@@ -458,7 +479,7 @@ class GaussianDiffusion(nn.Module):
         self.denoise_fn = denoise_fn    # Unet
         self.objective = objective
         self.noise_grid_num = noise_grid_num
-        self.do_distillation = do_distillation
+        self.distillation_type = distillation_type
 
         betas = cosine_beta_schedule(timesteps)
 
@@ -505,17 +526,17 @@ class GaussianDiffusion(nn.Module):
     # sqrt_recipm1_alphas_cumprod_t scales the noise std to to the same std used to generate the noise.
     def predict_start_from_noise(self, x_t, t, noise):
         return (
-            extract(self.sqrt_recip_alphas_cumprod, t, x_t.shape) * x_t -
-            extract(self.sqrt_recipm1_alphas_cumprod, t, x_t.shape) * noise
+            extract_tensor(self.sqrt_recip_alphas_cumprod, t, x_t.shape) * x_t -
+            extract_tensor(self.sqrt_recipm1_alphas_cumprod, t, x_t.shape) * noise
         )
 
     def q_posterior(self, x_start, x_t, t):
         posterior_mean = (
-            extract(self.posterior_mean_coef1, t, x_t.shape) * x_start +
-            extract(self.posterior_mean_coef2, t, x_t.shape) * x_t
+            extract_tensor(self.posterior_mean_coef1, t, x_t.shape) * x_start +
+            extract_tensor(self.posterior_mean_coef2, t, x_t.shape) * x_t
         )
-        posterior_variance = extract(self.posterior_variance, t, x_t.shape)
-        posterior_log_variance_clipped = extract(self.posterior_log_variance_clipped, t, x_t.shape)
+        posterior_variance = extract_tensor(self.posterior_variance, t, x_t.shape)
+        posterior_log_variance_clipped = extract_tensor(self.posterior_log_variance_clipped, t, x_t.shape)
         return posterior_mean, posterior_variance, posterior_log_variance_clipped
 
     def p_mean_variance(self, x, t, clip_denoised: bool):
@@ -584,8 +605,8 @@ class GaussianDiffusion(nn.Module):
         noise = default(noise, lambda: torch.randn_like(x_start))
         t = t.unsqueeze(1)
         # t serves as a tensor of indices, to extract elements from sqrt_alphas_cumprod.
-        x_start_weight = extract(self.sqrt_alphas_cumprod, t.flatten(), x_start.shape).reshape(t.shape)
-        noise_weight   = extract(self.sqrt_one_minus_alphas_cumprod, t.flatten(), x_start.shape).reshape(t.shape)
+        x_start_weight = extract_tensor(self.sqrt_alphas_cumprod, t.flatten(), x_start.shape).reshape(t.shape)
+        noise_weight   = extract_tensor(self.sqrt_one_minus_alphas_cumprod, t.flatten(), x_start.shape).reshape(t.shape)
 
         if t.shape[2] > 1 or t.shape[3] > 1:
             # repeat noise weights and x_start weights to have the same size as x_start.
