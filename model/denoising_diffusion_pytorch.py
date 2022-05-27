@@ -649,7 +649,7 @@ class GaussianDiffusion(nn.Module):
         noise = default(noise, lambda: torch.randn_like(x_start))
 
         x = self.q_sample(x_start=x_start, t=t, noise=noise)
-        if self.do_distillation:
+        if self.distillation_type != 'none':
             if self.objective == 'pred_noise':
                 # Using noise performs worse.
                 img_gt = x_start                

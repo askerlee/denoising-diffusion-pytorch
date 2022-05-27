@@ -163,7 +163,10 @@ unet = Unet(
     dim = 64,
     dim_mults = (1, 2, 4, 8),
     # with_time_emb = True, do time embedding.
-    memory_size = args.memory_size
+    memory_size = args.memory_size,
+    # if distillation_type=='miniature', use a miniature of original images as privileged information to train the teacher model.
+    # if distillation_type=='imgfeat', use image features extracted with a pretrained model to train the teacher model.
+    distillation_type = args.distillation_type
 )
 
 diffusion = GaussianDiffusion(
