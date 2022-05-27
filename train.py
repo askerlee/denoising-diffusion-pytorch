@@ -101,7 +101,7 @@ class Trainer(object):
                         loss = loss_dict['loss'].mean()
                         self.scaler.scale(loss / self.gradient_accumulate_every).backward()
 
-                    if args.do_distillation:
+                    if args.distillation_type != 'none':
                         loss_stu = loss_dict['loss_stu'].mean()
                         loss_tea = loss_dict['loss_tea'].mean()
                         pbar.set_description(f'stu {loss_stu.item():.4f}, tea {loss_tea.item():.4f}')

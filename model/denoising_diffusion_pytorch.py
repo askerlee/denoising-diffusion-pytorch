@@ -679,7 +679,7 @@ class GaussianDiffusion(nn.Module):
             raise ValueError(f'unknown objective {self.objective}')
 
         loss_stu = self.loss_fn(pred_stu, target)
-        if self.do_distillation:
+        if self.distillation_type != 'none':
             loss_tea = self.loss_fn(pred_tea, target)
         else:
             loss_tea = 0
