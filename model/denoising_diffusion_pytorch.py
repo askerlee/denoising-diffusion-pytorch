@@ -9,6 +9,9 @@ from einops import rearrange
 from .laplacian import LapLoss
 import timm
 
+timm_model2dim = { 'efficientnet_b0': 1280, 'resnet34': 512,
+                   'resnet18': 512 }
+
 # helpers functions
 
 def exists(x):
@@ -314,17 +317,19 @@ class Unet(nn.Module):
 
         self.distillation_type = distillation_type
         if self.distillation_type == 'imgfeat':
-            self.imgfeat_model = timm.create_model('resnet34', pretrained=True)
+            self.distill_feat_extractor_type = 'efficientnet_b0'    # 'resnet34'
+            self.distill_feat_dim            = timm_model2dim[self.distill_feat_extractor_type]
+            self.distill_feat_extractor      = timm.create_model(self.distill_feat_extractor_type, pretrained=True)
         else:
-            self.imgfeat_model = None
+            self.distill_feat_extractor = None
             
         for ind, (dim_in, dim_out) in enumerate(reversed(in_out[1:])):
             is_last = ind >= (num_resolutions - 1)
             # miniature image / image features as teacher's priviliged information.
             if ind == 0:
                 if self.distillation_type == 'imgfeat':
-                    # resnet34 output features.
-                    extra_in_dim = 512
+                    # number of output features from the image feature extractor.
+                    extra_in_dim = self.distill_feat_dim
                 else:
                     extra_in_dim = 3
             else:
@@ -399,7 +404,7 @@ class Unet(nn.Module):
             x = mid_feat
             if self.distillation_type == 'imgfeat':
                 # For 128x128 images, features are 4x4. Resize to 16x16.
-                gt_info = self.imgfeat_model.forward_features(img_gt)
+                gt_info = self.distill_feat_extractor.forward_features(img_gt)
                 gt_info = F.interpolate(gt_info, size=x.shape[2:], mode='bilinear', align_corners=False)
             else:
                 # A miniature image as teacher's priviliged information. 
