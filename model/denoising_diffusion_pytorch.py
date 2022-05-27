@@ -241,7 +241,7 @@ class Unet(nn.Module):
         memory_size = 1024,
         learned_variance = False,
         distillation_type = 'none',
-        distill_feat_stop_grad = False,
+        distill_feat_stop_grad = True,
     ):
         super().__init__()
 
@@ -409,11 +409,14 @@ class Unet(nn.Module):
         if img_gt is not None:
             x = mid_feat
             if self.distillation_type != 'none' and self.distillation_type != 'mini':
-                # For 128x128 images, features are 4x4. Resize to 16x16.
-                gt_info = self.distill_feat_extractor.forward_features(img_gt)
-                gt_info = F.interpolate(gt_info, size=x.shape[2:], mode='bilinear', align_corners=False)
                 if self.distill_feat_stop_grad:
-                    gt_info = gt_info.detach()
+                    # Wrap the feature extraction with no_grad() to save RAM.
+                    with torch.no_grad():
+                        gt_info = self.distill_feat_extractor.forward_features(img_gt)
+                else:
+                    gt_info = self.distill_feat_extractor.forward_features(img_gt)
+                # For 128x128 images, features are 4x4. Resize to 16x16.
+                gt_info = F.interpolate(gt_info, size=x.shape[2:], mode='bilinear', align_corners=False)
 
             elif self.distillation_type == 'mini':
                 # A miniature image as teacher's priviliged information. 
