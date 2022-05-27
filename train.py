@@ -154,8 +154,8 @@ parser.add_argument('--sampinterval', dest='save_sample_interval', type=int, def
 parser.add_argument('--distill', dest='distillation_type', choices=['none', 'mini', 'resnet34', 'resnet18', 'repvgg_b0'], 
                     default='none', help='Distill: use a miniature or features of original images to train a teacher model, '
                          'making the model converge faster.')
-parser.add_argument('--distillsg', dest='distill_feat_stop_grad', action='store_true', 
-                    help='Do not finetune the pretrained image feature extractor of the teacher model.')
+parser.add_argument('--nodistillsg', dest='distill_feat_stop_grad', default=True, action='store_false', 
+                    help='Finetune the pretrained image feature extractor of the teacher model (default: freeze it).')
 
 args = parser.parse_args()
 print(f"Args:\n{args}")
