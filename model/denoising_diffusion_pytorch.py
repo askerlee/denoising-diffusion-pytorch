@@ -399,7 +399,7 @@ class Unet(nn.Module):
             x = mid_feat
             if self.distillation_type == 'imgfeat':
                 # For 128x128 images, features are 4x4. Resize to 16x16.
-                gt_info = self.imgfeat_model(img_gt)
+                gt_info = self.imgfeat_model.forward_features(img_gt)
                 gt_info = F.interpolate(gt_info, size=x.shape[2:], mode='bilinear', align_corners=False)
             else:
                 # A miniature image as teacher's priviliged information. 
