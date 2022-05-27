@@ -3,6 +3,7 @@ from torch.utils import data
 from torchvision import transforms, utils
 from pathlib import Path
 from PIL import Image
+import timm
 
 def cycle(dl):
     while True:
@@ -71,13 +72,18 @@ def sample_images(model, num_images, batch_size, img_save_path):
 
 # For CNN models, just forward to forward_features().
 # For ViTs, patch the original timm code to keep the spatial dimensions of the extracted image features.
-def timm_extract_features(model_type, model, x, size=224):
-    if not model_type.startswith('vit'):
+def timm_extract_features(model, x):
+    if type(model) != timm.models.vision_transformer.VisionTransformer:
         return model.forward_features(x)
 
+    # img_size and patch_size are tuples.
+    img_size = model.patch_embed.img_size
+    patch_size = model.patch_embed.patch_size
+    out_size = (img_size[0] // patch_size[0], img_size[1] // patch_size[1])
+
     # timm vit only accepts fixed images. So x has to be resized to [224, 224].
-    if x.shape[2:] != (size, size):
-        x = torch.nn.functional.interpolate(x, size=(size, size), mode='bilinear', align_corners=False)
+    if x.shape[2:] != img_size:
+        x = torch.nn.functional.interpolate(x, size=img_size, mode='bilinear', align_corners=False)
 
     x = model.patch_embed(x)
     cls_token = model.cls_token.expand(x.shape[0], -1, -1)  # stole cls_tokens impl from Phil Wang, thanks
@@ -89,5 +95,5 @@ def timm_extract_features(model_type, model, x, size=224):
     x = model.blocks(x)
     x = model.norm(x)
     # Remove the 'CLS' token from the output.
-    x = x[:, 1:].permute(0, 2, 1).reshape(x.shape[0], -1, size//8, size//8)
+    x = x[:, 1:].permute(0, 2, 1).reshape(x.shape[0], -1, *out_size)
     return x

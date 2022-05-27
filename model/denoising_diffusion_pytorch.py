@@ -14,7 +14,8 @@ timm_model2dim = { 'resnet34': 512,
                    'resnet18': 512,
                    'repvgg_b0': 1280,
                    'mobilenetv2_120d': 1280,
-                   'vit_base_patch8_224': 768 }
+                   'vit_base_patch8_224': 768,
+                   'vit_tiny_patch16_224': 192 }
 
 # helpers functions
 
@@ -415,9 +416,9 @@ class Unet(nn.Module):
                 if self.distill_feat_stop_grad:
                     # Wrap the feature extraction with no_grad() to save RAM.
                     with torch.no_grad():
-                        gt_info = timm_extract_features(self.distill_feat_extractor_type, self.distill_feat_extractor, img_gt)
+                        gt_info = timm_extract_features(self.distill_feat_extractor, img_gt)
                 else:
-                    gt_info = timm_extract_features(self.distill_feat_extractor_type, self.distill_feat_extractor, img_gt)
+                    gt_info = timm_extract_features(self.distill_feat_extractor, img_gt)
                 # For 128x128 images, features are 4x4. Resize to 16x16.
                 gt_info = F.interpolate(gt_info, size=x.shape[2:], mode='bilinear', align_corners=False)
 
