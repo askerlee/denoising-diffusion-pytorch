@@ -314,7 +314,7 @@ class Unet(nn.Module):
 
         self.distillation_type = distillation_type
         if self.distillation_type == 'imgfeat':
-            self.imgfeat_model = timm.get_model('resnet34', pretrained=True)
+            self.imgfeat_model = timm.create_model('resnet34', pretrained=True)
         else:
             self.imgfeat_model = None
             
