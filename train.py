@@ -154,6 +154,8 @@ parser.add_argument('--sampinterval', dest='save_sample_interval', type=int, def
 parser.add_argument('--distill', dest='distillation_type', choices=['none', 'mini', 'resnet34', 'resnet18', 'repvgg_b0'], 
                     default='none', help='Distill: use a miniature or features of original images to train a teacher model, '
                          'making the model converge faster.')
+parser.add_argument('--distillsg', dest='distill_feat_stop_grad', action='store_true', 
+                    help='Do not finetune the pretrained image feature extractor of the teacher model.')
 
 args = parser.parse_args()
 print(f"Args:\n{args}")
@@ -166,7 +168,10 @@ unet = Unet(
     # if distillation_type=='mini', use a miniature of original images as privileged information to train the teacher model.
     # if distillation_type=='resnet34' or another model name, 
     # use image features extracted with a pretrained model to train the teacher model.
-    distillation_type = args.distillation_type
+    distillation_type = args.distillation_type,
+    # if distill_feat_stop_grad=True,
+    # do not finetune the pretrained image feature extractor of the teacher model.
+    distill_feat_stop_grad = args.distill_feat_stop_grad
 )
 
 diffusion = GaussianDiffusion(

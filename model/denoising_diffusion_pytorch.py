@@ -240,7 +240,8 @@ class Unet(nn.Module):
         resnet_block_groups = 8,
         memory_size = 1024,
         learned_variance = False,
-        distillation_type = 'none'
+        distillation_type = 'none',
+        distill_feat_stop_grad = False,
     ):
         super().__init__()
 
@@ -317,6 +318,8 @@ class Unet(nn.Module):
             ]))
 
         self.distillation_type = distillation_type
+        self.distill_feat_stop_grad = distill_feat_stop_grad
+        
         if self.distillation_type != 'none' and self.distillation_type != 'mini':
             # Tried 'efficientnet_b0', but it doesn't perform well.
             # 'resnet34', 'resnet18', 'repvgg_b0'
@@ -409,13 +412,16 @@ class Unet(nn.Module):
                 # For 128x128 images, features are 4x4. Resize to 16x16.
                 gt_info = self.distill_feat_extractor.forward_features(img_gt)
                 gt_info = F.interpolate(gt_info, size=x.shape[2:], mode='bilinear', align_corners=False)
+                if self.distill_feat_stop_grad:
+                    gt_info = gt_info.detach()
+
             elif self.distillation_type == 'mini':
                 # A miniature image as teacher's priviliged information. 
                 # Resize 128x128 images to 16x16.
                 gt_info = F.interpolate(img_gt, size=x.shape[2:], mode='bilinear', align_corners=False)
             else:
                 breakpoint()
-                
+
             for ind, (block1, block2, attn, upsample) in enumerate(self.ups_tea):
                 if ind == 0:
                     x = torch.cat((x, h[-ind-1], gt_info), dim=1)
