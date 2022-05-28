@@ -334,7 +334,7 @@ class Unet(nn.Module):
             # number of output features from the image feature extractor.
             extra_up_dim = self.distill_feat_dim
 
-        extra_up_dims = [ extra_up_dim ] + [1] * (num_resolutions - 1)
+        extra_up_dims = [ extra_up_dim ] + [0] * (num_resolutions - 1)
                         
         for ind, (dim_in, dim_out) in enumerate(reversed(in_out[1:])):
             is_last = ind >= (num_resolutions - 1)
@@ -350,7 +350,6 @@ class Unet(nn.Module):
         for ind, (dim_in, dim_out) in enumerate(reversed(in_out[1:])):
             is_last = ind >= (num_resolutions - 1)
             # miniature image / image features as teacher's priviliged information.
-
 
             self.ups_tea.append(nn.ModuleList([
                 block_klass(dim_out * 2 + extra_up_dim, dim_in, time_emb_dim = time_dim),
