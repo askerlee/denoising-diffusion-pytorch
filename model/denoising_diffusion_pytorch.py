@@ -427,11 +427,15 @@ class Unet(nn.Module):
 
         mid_feat = x
 
+        # Always fine-tune the student feature extractor.
+        noise_feat = self.extract_distill_feat(self.dist_feat_ext_stu, init_noise, mid_feat, 
+                                               do_finetune=True)
         for ind, (block1, block2, attn, upsample) in enumerate(self.ups):
-            # Always fine-tune the student feature extractor.
-            noise_feat = self.extract_distill_feat(self.dist_feat_ext_stu, init_noise, mid_feat, 
-                                                   do_finetune=True)
-            x = torch.cat((x, h[-ind-1], noise_feat), dim=1)
+            if ind == 0:
+                x = torch.cat((x, h[-ind-1], noise_feat), dim=1)
+            else:
+                x = torch.cat((x, h[-ind-1]), dim=1)
+
             x = block1(x, t)
             x = block2(x, t)
             x = attn(x)
