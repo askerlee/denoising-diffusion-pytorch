@@ -4,6 +4,7 @@ from torch.utils import data
 from torchvision import transforms, utils
 from pathlib import Path
 from PIL import Image
+import numpy as np
 import timm
 from .laplacian import LapLoss
 import imgaug.augmenters as iaa
@@ -91,7 +92,7 @@ class Dataset(data.Dataset):
     def __getitem__(self, index):
         path = self.paths[index]
         img = Image.open(path)
-        return self.geo_aug_func.augment_image(img)
+        return self.geo_aug_func.augment_image(np.array(img))
 
 class EMA():
     def __init__(self, beta):
