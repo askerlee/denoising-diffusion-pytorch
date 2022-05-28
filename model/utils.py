@@ -141,10 +141,7 @@ def timm_extract_features(model, x):
 
     x = model.patch_embed(x)
     cls_token = model.cls_token.expand(x.shape[0], -1, -1)  # stole cls_tokens impl from Phil Wang, thanks
-    if model.dist_token is None:
-        x = torch.cat((cls_token, x), dim=1)
-    else:
-        x = torch.cat((cls_token, model.dist_token.expand(x.shape[0], -1, -1), x), dim=1)
+    x = torch.cat((cls_token, x), dim=1)
     x = model.pos_drop(x + model.pos_embed)
     x = model.blocks(x)
     x = model.norm(x)
