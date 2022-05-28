@@ -91,7 +91,7 @@ class Dataset(data.Dataset):
     def __getitem__(self, index):
         path = self.paths[index]
         img = Image.open(path)
-        return self.geo_aug_func(img)
+        return self.geo_aug_func.augment_image(img)
 
 class EMA():
     def __init__(self, beta):
