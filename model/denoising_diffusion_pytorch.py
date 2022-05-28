@@ -8,7 +8,7 @@ from functools import partial
 import timm
 from einops import rearrange
 from .laplacian import LapLoss
-from .utils import timm_extract_features
+from .utils import timm_extract_features, dual_teaching_loss
 
 timm_model2dim = { 'resnet34': 512,
                    'resnet18': 512,
@@ -486,6 +486,7 @@ class GaussianDiffusion(nn.Module):
         objective = 'pred_noise',
         noise_grid_num = 1,
         distillation_type = 'none',
+        dual_teach_loss_weight = 0.02,
     ):
         super().__init__()
         if isinstance(denoise_fn, torch.nn.DataParallel):
@@ -503,6 +504,7 @@ class GaussianDiffusion(nn.Module):
         self.objective = objective
         self.noise_grid_num = noise_grid_num
         self.distillation_type = distillation_type
+        self.dual_teach_loss_weight = dual_teach_loss_weight
 
         betas = cosine_beta_schedule(timesteps)
 
@@ -703,11 +705,13 @@ class GaussianDiffusion(nn.Module):
 
         loss_stu = self.loss_fn(pred_stu, target)
         if self.distillation_type != 'none':
-            loss_tea = self.loss_fn(pred_tea, target)
+            loss_tea    = self.loss_fn(pred_tea, target)
+            loss_dual   = dual_teaching_loss(target, pred_stu, pred_tea)
+            loss_distill = loss_tea + self.dual_teach_loss_weight * loss_dual
         else:
-            loss_tea = 0
+            loss_distill = 0
         
-        loss = loss_stu + loss_tea
+        loss = loss_stu + loss_distill
 
         # Capping loss at 1 might helps early iterations when losses are unstable (occasionally very large).
         if loss > 1:

@@ -23,6 +23,7 @@ class Trainer(object):
         image_size = 128,
         train_batch_size = 32,
         train_lr = 1e-4,
+        weight_decay = 1e-3,
         train_num_steps = 100000,
         gradient_accumulate_every = 2,
         amp = True,
@@ -48,7 +49,7 @@ class Trainer(object):
         self.ds = Dataset(folder, image_size)
         self.dl = cycle(data.DataLoader(self.ds, batch_size = train_batch_size, shuffle=True, 
                                         pin_memory=True, num_workers=5))
-        self.opt = Adam(diffusion_model.parameters(), lr=train_lr)
+        self.opt = Adam(diffusion_model.parameters(), lr=train_lr, weight_decay=weight_decay)
 
         self.step = 0
 
@@ -158,6 +159,7 @@ parser.add_argument('--distill', dest='distillation_type',
                          'making the model converge faster.')
 parser.add_argument('--nodistillsg', dest='distill_feat_stop_grad', default=True, action='store_false', 
                     help='Finetune the pretrained image feature extractor of the teacher model (default: freeze it).')
+parser.add_argument('--dualweight', dest='dual_teach_loss_weight', type=float, default=0.02)
 
 args = parser.parse_args()
 print(f"Args:\n{args}")
@@ -181,14 +183,15 @@ diffusion = GaussianDiffusion(
     image_size = 128,               # Input image is resized to image_size before augmentation.
     timesteps = args.timesteps,     # number of maximum diffusion steps
     loss_type = args.loss_type,     # lap (Laplacian), L1 or L2
-    objective=args.objective_type,  # objective type, pred_noise or pred_x0
+    objective = args.objective_type,  # objective type, pred_noise or pred_x0
     # noise_grid_num: default 1, same time t for a whole image. 
     # If > 1, divide the image into N*N grids, and each grid has a separate t.
-    noise_grid_num=args.noise_grid_num, 
+    noise_grid_num = args.noise_grid_num, 
     # if distillation_type=='mini', use a miniature of original images as privileged information to train the teacher model.
     # if distillation_type=='resnet34' or another model name, 
     # use image features extracted with a pretrained model to train the teacher model.
-    distillation_type=args.distillation_type,   
+    distillation_type = args.distillation_type,   
+    dual_teach_loss_weight = args.dual_teach_loss_weight
 )
 
 # default using two GPUs.

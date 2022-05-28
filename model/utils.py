@@ -1,9 +1,11 @@
 import torch
+import torch.nn as nn
 from torch.utils import data
 from torchvision import transforms, utils
 from pathlib import Path
 from PIL import Image
 import timm
+from .laplacian import LapLoss
 
 def cycle(dl):
     while True:
@@ -97,3 +99,38 @@ def timm_extract_features(model, x):
     # Remove the 'CLS' token from the output.
     x = x[:, 1:].permute(0, 2, 1).reshape(x.shape[0], -1, *out_size)
     return x
+
+
+# Dual teaching helps slightly.
+def dual_teaching_loss(img_gt, img_stu, img_tea):
+    loss_distill = 0
+    # Ws[0]: weight of teacher -> student.
+    # Ws[1]: weight of student -> teacher.
+    # Two directions could take different weights.
+    # Set Ws[1] to 0 to disable student -> teacher.
+    Ws = [1, 0.5]
+    use_lap_loss = False
+    # Laplacian loss performs better in earlier epochs, but worse in later epochs.
+    # Moreover, Laplacian loss is significantly slower.
+    if use_lap_loss:
+        loss_fun = LapLoss(max_levels=3, reduction='none')
+    else:
+        loss_fun = nn.L1Loss(reduction='none')
+
+    for i in range(2):
+        student_error = loss_fun(img_stu, img_gt).mean(1, True)
+        teacher_error = loss_fun(img_tea, img_gt).mean(1, True)
+        # distill_mask indicates where the warped images according to student's prediction 
+        # is worse than that of the teacher.
+        # If at some points, the warped image of the teacher is better than the student,
+        # then regard the flow at these points are more accurate, and use them to teach the student.
+        distill_mask = (student_error > teacher_error + 0.01).float().detach()
+
+        # loss_distill is the sum of the distillation losses at 2 directions.
+        loss_distill += Ws[i] * ((img_tea.detach() - img_stu).abs() * distill_mask).mean()
+
+        # Swap student and teacher, and calculate the distillation loss again.
+        img_stu, img_tea = img_tea, img_stu
+        # The distillation loss from the student to the teacher is given a smaller weight.
+
+    return loss_distill
