@@ -3,7 +3,8 @@ import torch.nn as nn
 from torch.utils import data
 from torchvision import transforms, utils
 from pathlib import Path
-from PIL import Image
+#from PIL import Image
+import cv2
 import numpy as np
 import timm
 from .laplacian import LapLoss
@@ -91,7 +92,7 @@ class Dataset(data.Dataset):
 
     def __getitem__(self, index):
         path = self.paths[index]
-        img = Image.open(path)
+        img = cv2.imread(path)
         return self.geo_aug_func.augment_image(np.array(img))
 
 class EMA():
