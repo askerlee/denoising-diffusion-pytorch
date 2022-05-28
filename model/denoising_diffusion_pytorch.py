@@ -257,10 +257,11 @@ class Unet(nn.Module):
         # image size is the same after init_conv, as default stride=1.
         self.init_conv = nn.Conv2d(channels, init_dim, 7, padding = 3)
 
-        # init_conv + 4 layers.
+        # init_conv + num_resolutions (4) layers.
         dims = [init_dim, *map(lambda m: dim * m, dim_mults)]
         # 4 pairs of layers in the encoder/decoder.
         in_out = list(zip(dims[:-1], dims[1:]))
+        num_resolutions = len(in_out)
 
         block_klass = partial(ResnetBlock, groups = resnet_block_groups)
 
@@ -285,7 +286,6 @@ class Unet(nn.Module):
         # ups_tea: teacher decoder
         self.ups_tea = nn.ModuleList([])
 
-        num_resolutions = len(in_out)
 
         # LinearAttention layers are used in encoder/decoder.
         # Using vanilla attention in encoder/decoder takes 13x RAM, and is 3x slower.
@@ -311,16 +311,6 @@ class Unet(nn.Module):
         # Seems setting kernel size to 1 leads to slightly worse images?
         self.mid_block2 = block_klass(mid_dim, mid_dim, kernel_size=1, time_emb_dim = time_dim)
 
-        for ind, (dim_in, dim_out) in enumerate(reversed(in_out[1:])):
-            is_last = ind >= (num_resolutions - 1)
-
-            self.ups.append(nn.ModuleList([
-                block_klass(dim_out * 2, dim_in, time_emb_dim = time_dim),
-                block_klass(dim_in, dim_in, time_emb_dim = time_dim),
-                Residual(PreNorm(dim_in, LinearAttention(dim_in, memory_size=memory_size))),
-                Upsample(dim_in) if not is_last else nn.Identity()
-            ]))
-
         self.distillation_type = distillation_type
         self.distill_feat_stop_grad = distill_feat_stop_grad
         
@@ -328,25 +318,42 @@ class Unet(nn.Module):
             # Tried 'efficientnet_b0', but it doesn't perform well.
             # 'resnet34', 'resnet18', 'repvgg_b0'
             self.distill_feat_extractor_type = self.distillation_type 
-            self.distill_feat_dim            = timm_model2dim[self.distill_feat_extractor_type]
-            self.distill_feat_extractor      = timm.create_model(self.distill_feat_extractor_type, pretrained=True)
+            self.distill_feat_dim   = timm_model2dim[self.distill_feat_extractor_type]
+            self.dist_feat_ext_tea  = timm.create_model(self.distill_feat_extractor_type, pretrained=True)
+            self.dist_feat_ext_stu  = timm.create_model(self.distill_feat_extractor_type, pretrained=True)
         else:
-            self.distill_feat_extractor = None
-            
+            self.distill_feat_dim  = 0
+            self.dist_feat_ext_tea = None
+            self.dist_feat_ext_stu = None
+
+        if self.distillation_type == 'none':
+            extra_up_dim = 0
+        elif self.distillation_type == 'mini':
+            extra_up_dim = 3
+        else:
+            # number of output features from the image feature extractor.
+            extra_up_dim = self.distill_feat_dim
+
+        extra_up_dims = [ extra_up_dim ] + [1] * (num_resolutions - 1)
+                        
+        for ind, (dim_in, dim_out) in enumerate(reversed(in_out[1:])):
+            is_last = ind >= (num_resolutions - 1)
+
+            self.ups.append(nn.ModuleList([
+                block_klass(dim_out * 2 + extra_up_dims[ind], dim_in, time_emb_dim = time_dim),
+                block_klass(dim_in, dim_in, time_emb_dim = time_dim),
+                Residual(PreNorm(dim_in, LinearAttention(dim_in, memory_size=memory_size))),
+                Upsample(dim_in) if not is_last else nn.Identity()
+            ]))
+
+
         for ind, (dim_in, dim_out) in enumerate(reversed(in_out[1:])):
             is_last = ind >= (num_resolutions - 1)
             # miniature image / image features as teacher's priviliged information.
-            if ind == 0:
-                if self.distillation_type != 'none' and self.distillation_type != 'mini':
-                    # number of output features from the image feature extractor.
-                    extra_in_dim = self.distill_feat_dim
-                else:
-                    extra_in_dim = 3
-            else:
-                extra_in_dim = 0
+
 
             self.ups_tea.append(nn.ModuleList([
-                block_klass(dim_out * 2 + extra_in_dim, dim_in, time_emb_dim = time_dim),
+                block_klass(dim_out * 2 + extra_up_dim, dim_in, time_emb_dim = time_dim),
                 block_klass(dim_in, dim_in, time_emb_dim = time_dim),
                 Residual(PreNorm(dim_in, LinearAttention(dim_in, memory_size=memory_size))),
                 Upsample(dim_in) if not is_last else nn.Identity()
@@ -360,7 +367,29 @@ class Unet(nn.Module):
             nn.Conv2d(dim, self.out_dim, 1)
         )
 
+    def extract_distill_feat(self, feat_extractor, img, mid_feat):
+        if self.distillation_type == 'none':
+            # Just return an empty tensor.
+            return torch.zeros_like(mid_feat[:, []])
+
+        if self.distillation_type == 'mini':
+            # A miniature image as teacher's priviliged information. 
+            # 128x128 images will be resized to 16x16 below.
+            distill_feat = img
+        else:
+            if self.distill_feat_stop_grad:
+                # Wrap the feature extraction with no_grad() to save RAM.
+                with torch.no_grad():
+                    distill_feat = timm_extract_features(feat_extractor, img)
+            else:
+                distill_feat = timm_extract_features(feat_extractor, img)
+
+        # For 128x128 images, vit features are 4x4. Resize to 16x16.
+        distill_feat = F.interpolate(distill_feat, size=mid_feat.shape[2:], mode='bilinear', align_corners=False)
+        return distill_feat
+
     def forward(self, x, time, img_gt=None):
+        init_noise = x
         x = self.init_conv(x)
         # t: time embedding.
         if exists(self.time_mlp):
@@ -399,7 +428,8 @@ class Unet(nn.Module):
         mid_feat = x
 
         for ind, (block1, block2, attn, upsample) in enumerate(self.ups):
-            x = torch.cat((x, h[-ind-1]), dim=1)
+            noise_feat = self.extract_distill_feat(self.dist_feat_ext_stu, init_noise)
+            x = torch.cat((x, h[-ind-1], noise_feat), dim=1)
             x = block1(x, t)
             x = block2(x, t)
             x = attn(x)
@@ -412,26 +442,11 @@ class Unet(nn.Module):
         # img_gt is provided. Do distillation.
         if img_gt is not None:
             x = mid_feat
-            if self.distillation_type != 'none' and self.distillation_type != 'mini':
-                if self.distill_feat_stop_grad:
-                    # Wrap the feature extraction with no_grad() to save RAM.
-                    with torch.no_grad():
-                        gt_info = timm_extract_features(self.distill_feat_extractor, img_gt)
-                else:
-                    gt_info = timm_extract_features(self.distill_feat_extractor, img_gt)
-                # For 128x128 images, features are 4x4. Resize to 16x16.
-                gt_info = F.interpolate(gt_info, size=x.shape[2:], mode='bilinear', align_corners=False)
-
-            elif self.distillation_type == 'mini':
-                # A miniature image as teacher's priviliged information. 
-                # Resize 128x128 images to 16x16.
-                gt_info = F.interpolate(img_gt, size=x.shape[2:], mode='bilinear', align_corners=False)
-            else:
-                breakpoint()
+            gt_feat = self.extract_distill_feat(self.dist_feat_ext_tea, img_gt)
 
             for ind, (block1, block2, attn, upsample) in enumerate(self.ups_tea):
                 if ind == 0:
-                    x = torch.cat((x, h[-ind-1], gt_info), dim=1)
+                    x = torch.cat((x, h[-ind-1], gt_feat), dim=1)
                 else:
                     x = torch.cat((x, h[-ind-1]), dim=1)
 
