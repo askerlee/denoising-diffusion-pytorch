@@ -6,6 +6,8 @@ from pathlib import Path
 from PIL import Image
 import timm
 from .laplacian import LapLoss
+import imgaug.augmenters as iaa
+from torchvision.transforms import ColorJitter
 
 def cycle(dl):
     while True:
@@ -28,12 +30,60 @@ class Dataset(data.Dataset):
         self.image_size = image_size
         self.paths = [p for ext in exts for p in Path(f'{folder}').glob(f'**/*.{ext}')]
 
+        '''
         self.transform = transforms.Compose([
             transforms.Resize(image_size),
             transforms.RandomHorizontalFlip(),
             transforms.CenterCrop(image_size),
             transforms.ToTensor()
         ])
+        '''
+        affine_prob     = 0.1
+        perspect_prob   = 0.1 
+
+        tgt_height = tgt_width = image_size
+        self.geo_aug_func = iaa.Sequential(
+                [
+                    # Resize the image to the size (h, w). When the original image is too big, 
+                    # the first resizing avoids cropping too small fractions of the whole image.
+                    # For Sintel, (h, w) = (288, 680), around 2/3 of the original image size (436, 1024).
+                    # For Vimeo,  (h, w) = (256, 488) is the same as the original image size.
+                    # iaa.Resize({ 'height': self.h, 'width': self.w }),
+                    # As tgt_width=tgt_height=224, the aspect ratio is always 1.
+                    # Randomly crop to 256*256 (Vimeo) or 288*288 (Sintel).
+                    iaa.CropToAspectRatio(aspect_ratio=tgt_width/tgt_height, position='uniform'),
+                    # Crop a random length from uniform(0, 2*delta) (equal length at four sides). 
+                    # The mean crop length is delta, and the mean size of the output image is
+                    # (self.h - 2*delta) * (self.h - 2*delta) = tgt_height * tgt_height (=tgt_width).
+                    iaa.Crop(percent=(0, 0.1), keep_size=False),
+                    # Resize the image to the shape of target size.
+                    iaa.Resize({'height': tgt_height, 'width': tgt_width}),
+                    # apply the following augmenters to most images
+                    iaa.Fliplr(0.5),  # Horizontally flip 50% of all images
+                    iaa.Flipud(0.5),  # Vertically flip 50% of all images
+                    iaa.Sometimes(0.2, iaa.Rot90((1, 3))), # Randomly rotate 90, 180, 270 degrees 30% of the time
+                    # Affine transformation reduces dice by ~1%. So disable it by setting affine_prob=0.
+                    iaa.Sometimes(affine_prob, iaa.Affine(
+                            rotate=(-45, 45), # rotate by -45 to +45 degrees
+                            shear=(-16, 16), # shear by -16 to +16 degrees
+                            order=1,
+                            cval=(0,255),
+                            mode='constant'  
+                            # Previously mode='reflect' and no PerspectiveTransform => worse performance.
+                            # Which is the culprit? maybe mode='reflect'? 
+                            # But PerspectiveTransform should also have positive impact, as it simulates
+                            # a kind of scene changes due to motion.
+                    )),
+                    iaa.Sometimes(perspect_prob, 
+                                  iaa.PerspectiveTransform(scale=(0.01, 0.15), cval=(0,255), mode='constant')), 
+                    iaa.Sometimes(0.3, iaa.GammaContrast((0.7, 1.7))),    # Gamma contrast degrades?
+                    # When tgt_width==tgt_height, PadToFixedSize and CropToFixedSize are unnecessary.
+                    # Otherwise, we have to take care if the longer edge is rotated to the shorter edge.
+                    # iaa.PadToFixedSize(width=tgt_width,  height=tgt_height),
+                    # iaa.CropToFixedSize(width=tgt_width, height=tgt_height),
+                ])
+
+        self.color_fun          = ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.5/3.14)
 
     def __len__(self):
         return len(self.paths)
@@ -41,7 +91,7 @@ class Dataset(data.Dataset):
     def __getitem__(self, index):
         path = self.paths[index]
         img = Image.open(path)
-        return self.transform(img)
+        return self.geo_aug_func(img)
 
 class EMA():
     def __init__(self, beta):
@@ -101,7 +151,7 @@ def timm_extract_features(model, x):
     return x
 
 
-# Dual teaching helps slightly.
+# Dual teaching doesn't work.
 def dual_teaching_loss(img_gt, img_stu, img_tea):
     loss_distill = 0
     # Ws[0]: weight of teacher -> student.

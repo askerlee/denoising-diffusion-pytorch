@@ -157,9 +157,8 @@ parser.add_argument('--distill', dest='distillation_type',
                               'mobilenetv2_120d', 'vit_base_patch8_224', 'vit_tiny_patch16_224' ], 
                     default='none', help='Distill: use a miniature or features of original images to train a teacher model, '
                          'making the model converge faster.')
-parser.add_argument('--nodistillsg', dest='distill_feat_stop_grad', default=True, action='store_false', 
+parser.add_argument('--distillnosg', dest='distill_feat_stop_grad', default=True, action='store_false', 
                     help='Finetune the pretrained image feature extractor of the teacher model (default: freeze it).')
-parser.add_argument('--dualweight', dest='dual_teach_loss_weight', type=float, default=0.02)
 
 args = parser.parse_args()
 print(f"Args:\n{args}")
@@ -191,7 +190,7 @@ diffusion = GaussianDiffusion(
     # if distillation_type=='resnet34' or another model name, 
     # use image features extracted with a pretrained model to train the teacher model.
     distillation_type = args.distillation_type,   
-    dual_teach_loss_weight = args.dual_teach_loss_weight
+    # dual_teach_loss_weight = args.dual_teach_loss_weight
 )
 
 # default using two GPUs.
