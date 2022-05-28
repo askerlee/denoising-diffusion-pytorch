@@ -443,6 +443,7 @@ class Unet(nn.Module):
             x = upsample(x)
 
         pred_stu = self.final_conv(x)
+        gt_feat  = None
 
         # img_gt is provided. Do distillation.
         if img_gt is not None:
@@ -469,7 +470,7 @@ class Unet(nn.Module):
         else:
             pred_tea = None
 
-        return pred_stu, pred_tea
+        return { 'pred_stu': pred_stu, 'pred_tea': pred_tea, 'noise_feat': noise_feat, 'gt_feat': gt_feat }
 
 # gaussian diffusion trainer class
 # suppose t is a 1-d tensor of indices.
@@ -508,7 +509,7 @@ class GaussianDiffusion(nn.Module):
         objective = 'pred_noise',
         noise_grid_num = 1,
         distillation_type = 'none',
-        # dual_teach_loss_weight = 0.02,
+        align_tea_stu_feat_weight = 0,
     ):
         super().__init__()
         if isinstance(denoise_fn, torch.nn.DataParallel):
@@ -526,7 +527,7 @@ class GaussianDiffusion(nn.Module):
         self.objective = objective
         self.noise_grid_num = noise_grid_num
         self.distillation_type = distillation_type
-        # self.dual_teach_loss_weight = dual_teach_loss_weight
+        self.align_tea_stu_feat_weight = align_tea_stu_feat_weight
 
         betas = cosine_beta_schedule(timesteps)
 
@@ -587,7 +588,8 @@ class GaussianDiffusion(nn.Module):
         return posterior_mean, posterior_variance, posterior_log_variance_clipped
 
     def p_mean_variance(self, x, t, clip_denoised: bool):
-        model_output, _ = self.denoise_fn(x, t)
+        model_output_dict = self.denoise_fn(x, t)
+        model_output = model_output_dict['pred_stu']
 
         if self.objective == 'pred_noise':
             x_start = self.predict_start_from_noise(x, t = t, noise = model_output)
@@ -708,7 +710,9 @@ class GaussianDiffusion(nn.Module):
                 breakpoint()
         else:
             img_gt = None
-        pred_stu, pred_tea = self.denoise_fn(x, t, img_gt)
+        model_output_dict = self.denoise_fn(x, t, img_gt)
+        pred_stu, pred_tea  = model_output_dict['pred_stu'], model_output_dict['pred_tea']
+        noise_feat, gt_feat = model_output_dict['noise_feat'], model_output_dict['gt_feat']
 
         if self.objective == 'pred_noise':
             # Laplacian loss doesn't help. Instead, it makes convergence very slow.
@@ -728,13 +732,15 @@ class GaussianDiffusion(nn.Module):
         loss_stu = self.loss_fn(pred_stu, target)
         if self.distillation_type != 'none':
             loss_tea    = self.loss_fn(pred_tea, target)
-            # loss_dual   = dual_teaching_loss(target, pred_stu, pred_tea)
-            # loss_distill = loss_tea + self.dual_teach_loss_weight * loss_dual
+            if self.distillation_type != 'mini':
+                loss_align_tea_stu = F.l1_loss(noise_feat, gt_feat.detach())
+            else:
+                loss_align_tea_stu = 0
         else:
-            # loss_distill = 0
             loss_tea = 0
+            loss_align_tea_stu = 0
 
-        loss = loss_stu + loss_tea
+        loss = loss_stu + loss_tea + self.align_tea_stu_feat_weight * loss_align_tea_stu
 
         # Capping loss at 1 might helps early iterations when losses are unstable (occasionally very large).
         if loss > 1:

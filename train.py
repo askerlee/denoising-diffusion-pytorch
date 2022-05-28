@@ -136,6 +136,7 @@ parser.add_argument('--lr', type=float, default=2e-4, help="Learning rate")
 parser.add_argument('--bs', type=int, default=32, help="Batch size")
 parser.add_argument('--cp', type=str, dest='cp_path', default=None, help="The path of a model checkpoint")
 parser.add_argument('--sample', dest='sample_only', action='store_true', help='Do sampling using a trained model')
+parser.add_argument('--workers', dest='num_workers', type=int, default=4, help="Number of workers for data loading")
 
 parser.add_argument('--gpus', type=int, nargs='+', default=[0, 1])
 parser.add_argument('--noamp', dest='amp', default=True, action='store_false', help='Do not use mixed precision')
@@ -161,7 +162,9 @@ parser.add_argument('--distill', dest='distillation_type',
                          'which makes the model converge faster.')
 parser.add_argument('--tuneteacher', dest='finetune_tea_feat_ext', default=False, action='store_true', 
                     help='Fine-tune the pretrained image feature extractor of the teacher model (default: freeze it).')
-parser.add_argument('--workers', dest='num_workers', type=int, default=4, help="Number of workers for data loading")
+parser.add_argument('--alignfeat', dest='align_tea_stu_feat_weight', default=0.0, type=float, 
+                    help='Align the features of the feature extractors of the teacher and the student. '
+                    'Default: 0.0, meaning no alignment.')
 
 args = parser.parse_args()
 print(f"Args:\n{args}")
@@ -193,7 +196,7 @@ diffusion = GaussianDiffusion(
     # if distillation_type=='resnet34' or another model name, 
     # use image features extracted with a pretrained model to train the teacher model.
     distillation_type = args.distillation_type,   
-    # dual_teach_loss_weight = args.dual_teach_loss_weight
+    align_tea_stu_feat_weight = args.align_tea_stu_feat_weight
 )
 
 # default using two GPUs.
