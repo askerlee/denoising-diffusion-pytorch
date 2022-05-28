@@ -156,10 +156,11 @@ parser.add_argument('--sampinterval', dest='save_sample_interval', type=int, def
 parser.add_argument('--distill', dest='distillation_type', 
                     choices=[ 'none', 'mini', 'resnet34', 'resnet18', 'repvgg_b0', 
                               'mobilenetv2_120d', 'vit_base_patch8_224', 'vit_tiny_patch16_224' ], 
-                    default='none', help='Distill: use a miniature or features of original images to train a teacher model, '
-                         'making the model converge faster.')
-parser.add_argument('--freezeteacher', dest='finetune_tea_feat_ext', default=True, action='store_false', 
-                    help='Freeze the pretrained image feature extractor of the teacher model (default: finetune it).')
+                    default='vit_tiny_patch16_224', 
+                    help='Do distillation: use a miniature or features of original images to train a teacher model, '
+                         'which makes the model converge faster.')
+parser.add_argument('--tuneteacher', dest='finetune_tea_feat_ext', default=False, action='store_true', 
+                    help='Fine-tune the pretrained image feature extractor of the teacher model (default: freeze it).')
 parser.add_argument('--workers', dest='num_workers', type=int, default=4, help="Number of workers for data loading")
 
 args = parser.parse_args()
