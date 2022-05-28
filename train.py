@@ -158,8 +158,8 @@ parser.add_argument('--distill', dest='distillation_type',
                               'mobilenetv2_120d', 'vit_base_patch8_224', 'vit_tiny_patch16_224' ], 
                     default='none', help='Distill: use a miniature or features of original images to train a teacher model, '
                          'making the model converge faster.')
-parser.add_argument('--distillnosg', dest='distill_feat_stop_grad', default=True, action='store_false', 
-                    help='Finetune the pretrained image feature extractor of the teacher model (default: freeze it).')
+parser.add_argument('--freezeteacher', dest='finetune_tea_feat_ext', default=True, action='store_false', 
+                    help='Freeze the pretrained image feature extractor of the teacher model (default: finetune it).')
 parser.add_argument('--workers', dest='num_workers', type=int, default=4, help="Number of workers for data loading")
 
 args = parser.parse_args()
@@ -174,9 +174,9 @@ unet = Unet(
     # if distillation_type=='resnet34' or another model name, 
     # use image features extracted with a pretrained model to train the teacher model.
     distillation_type = args.distillation_type,
-    # if distill_feat_stop_grad=True,
+    # if finetune_tea_feat_ext=False,
     # do not finetune the pretrained image feature extractor of the teacher model.
-    distill_feat_stop_grad = args.distill_feat_stop_grad
+    finetune_tea_feat_ext = args.finetune_tea_feat_ext
 )
 
 diffusion = GaussianDiffusion(

@@ -245,7 +245,7 @@ class Unet(nn.Module):
         memory_size = 1024,
         learned_variance = False,
         distillation_type = 'none',
-        distill_feat_stop_grad = True,
+        finetune_tea_feat_ext = True,
     ):
         super().__init__()
 
@@ -311,8 +311,8 @@ class Unet(nn.Module):
         # Seems setting kernel size to 1 leads to slightly worse images?
         self.mid_block2 = block_klass(mid_dim, mid_dim, kernel_size=1, time_emb_dim = time_dim)
 
-        self.distillation_type = distillation_type
-        self.distill_feat_stop_grad = distill_feat_stop_grad
+        self.distillation_type      = distillation_type
+        self.finetune_tea_feat_ext  = finetune_tea_feat_ext
         
         if self.distillation_type != 'none' and self.distillation_type != 'mini':
             # Tried 'efficientnet_b0', but it doesn't perform well.
@@ -367,7 +367,7 @@ class Unet(nn.Module):
             nn.Conv2d(dim, self.out_dim, 1)
         )
 
-    def extract_distill_feat(self, feat_extractor, img, mid_feat):
+    def extract_distill_feat(self, feat_extractor, img, mid_feat, do_finetune=True):
         if self.distillation_type == 'none':
             # Just return an empty tensor.
             return torch.zeros_like(mid_feat[:, []])
@@ -377,7 +377,7 @@ class Unet(nn.Module):
             # 128x128 images will be resized to 16x16 below.
             distill_feat = img
         else:
-            if self.distill_feat_stop_grad:
+            if do_finetune:
                 # Wrap the feature extraction with no_grad() to save RAM.
                 with torch.no_grad():
                     distill_feat = timm_extract_features(feat_extractor, img)
@@ -428,7 +428,8 @@ class Unet(nn.Module):
         mid_feat = x
 
         for ind, (block1, block2, attn, upsample) in enumerate(self.ups):
-            noise_feat = self.extract_distill_feat(self.dist_feat_ext_stu, init_noise)
+            # Always fine-tune the student feature extractor.
+            noise_feat = self.extract_distill_feat(self.dist_feat_ext_stu, init_noise, do_finetune=True)
             x = torch.cat((x, h[-ind-1], noise_feat), dim=1)
             x = block1(x, t)
             x = block2(x, t)
@@ -442,7 +443,8 @@ class Unet(nn.Module):
         # img_gt is provided. Do distillation.
         if img_gt is not None:
             x = mid_feat
-            gt_feat = self.extract_distill_feat(self.dist_feat_ext_tea, img_gt)
+            # finetune_tea_feat_ext controls whether to fine-tune the teacher feature extractor.
+            gt_feat = self.extract_distill_feat(self.dist_feat_ext_tea, img_gt, do_finetune=self.finetune_tea_feat_ext)
 
             for ind, (block1, block2, attn, upsample) in enumerate(self.ups_tea):
                 if ind == 0:
