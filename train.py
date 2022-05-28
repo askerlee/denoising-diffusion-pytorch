@@ -30,7 +30,8 @@ class Trainer(object):
         step_start_ema = 2000,
         update_ema_every = 10,
         save_and_sample_every = 1000,
-        results_folder = './results'
+        results_folder = './results',
+        num_workers = 5,
     ):
         super().__init__()
         # model: GaussianDiffusion instance.
@@ -48,7 +49,7 @@ class Trainer(object):
 
         self.ds = Dataset(folder, image_size)
         self.dl = cycle(data.DataLoader(self.ds, batch_size = train_batch_size, shuffle=True, 
-                                        pin_memory=True, num_workers=5))
+                                        pin_memory=True, num_workers=num_workers))
         self.opt = Adam(diffusion_model.parameters(), lr=train_lr, weight_decay=weight_decay)
 
         self.step = 0
@@ -159,6 +160,7 @@ parser.add_argument('--distill', dest='distillation_type',
                          'making the model converge faster.')
 parser.add_argument('--distillnosg', dest='distill_feat_stop_grad', default=True, action='store_false', 
                     help='Finetune the pretrained image feature extractor of the teacher model (default: freeze it).')
+parser.add_argument('--workers', dest='num_workers', type=int, default=4, help="Number of workers for data loading")
 
 args = parser.parse_args()
 print(f"Args:\n{args}")

@@ -721,7 +721,10 @@ class GaussianDiffusion(nn.Module):
 
     def forward(self, img, *args, **kwargs):
         b, c, h, w, device, img_size, = *img.shape, img.device, self.image_size
-        assert h == img_size and w == img_size, f'height and width of image must be {img_size}'
+        if not (h == img_size and w == img_size):
+            print(f'height and width of image must be {img_size}')
+            breakpoint()
+            
         # t: random numbers of steps between 0 and num_timesteps - 1 (num_timesteps default is 1000)
         # (b,): different random steps for different images in a batch.
         t = torch.randint(0, self.num_timesteps, (b, self.noise_grid_num, self.noise_grid_num), 
