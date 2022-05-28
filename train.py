@@ -23,7 +23,7 @@ class Trainer(object):
         image_size = 128,
         train_batch_size = 32,
         train_lr = 1e-4,
-        weight_decay = 1e-3,
+        weight_decay = 0,
         train_num_steps = 100000,
         gradient_accumulate_every = 2,
         amp = True,

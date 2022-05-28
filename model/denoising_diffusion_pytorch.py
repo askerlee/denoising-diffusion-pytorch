@@ -709,7 +709,7 @@ class GaussianDiffusion(nn.Module):
             # loss_dual   = dual_teaching_loss(target, pred_stu, pred_tea)
             # loss_distill = loss_tea + self.dual_teach_loss_weight * loss_dual
         else:
-            loss_distill = 0
+            # loss_distill = 0
             loss_tea = 0
 
         loss = loss_stu + loss_tea

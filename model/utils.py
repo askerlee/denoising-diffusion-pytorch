@@ -56,16 +56,16 @@ class Dataset(data.Dataset):
                     # Crop a random length from uniform(0, 2*delta) (equal length at four sides). 
                     # The mean crop length is delta, and the mean size of the output image is
                     # (self.h - 2*delta) * (self.h - 2*delta) = tgt_height * tgt_height (=tgt_width).
-                    iaa.Crop(percent=(0, 0.05), keep_size=False),
+                    iaa.Crop(percent=(0, 0.1), keep_size=False),
                     # Resize the image to the shape of target size.
                     iaa.Resize({'height': tgt_height, 'width': tgt_width}),
                     # apply the following augmenters to most images
                     iaa.Fliplr(0.5),  # Horizontally flip 50% of all images
-                    # iaa.Flipud(0.5),  # Vertically flip 50% of all images
-                    # iaa.Sometimes(0.2, iaa.Rot90((1, 3))), # Randomly rotate 90, 180, 270 degrees 30% of the time
+                    iaa.Flipud(0.5),  # Vertically flip 50% of all images
+                    iaa.Sometimes(0.2, iaa.Rot90((1, 3))), # Randomly rotate 90, 180, 270 degrees 30% of the time
                     # Affine transformation reduces dice by ~1%. So disable it by setting affine_prob=0.
                     iaa.Sometimes(affine_prob, iaa.Affine(
-                            rotate=(-20, 20), # rotate by -45 to +45 degrees
+                            rotate=(-45, 45), # rotate by -45 to +45 degrees
                             shear=(-16, 16), # shear by -16 to +16 degrees
                             order=1,
                             cval=(0,255),
@@ -92,9 +92,7 @@ class Dataset(data.Dataset):
     def __getitem__(self, index):
         path = self.paths[index]
         img = np.array(Image.open(path))
-        img_aug = self.geo_aug_func.augment_image(np.array(img)).copy()
-        img_aug = transforms.ToTensor()(img_aug)
-        return img_aug
+        return self.geo_aug_func.augment_image(np.array(img)).copy()
 
 class EMA():
     def __init__(self, beta):
