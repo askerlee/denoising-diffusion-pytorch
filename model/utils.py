@@ -92,7 +92,8 @@ class Dataset(data.Dataset):
     def __getitem__(self, index):
         path = self.paths[index]
         img = np.array(Image.open(path))
-        return self.geo_aug_func.augment_image(np.array(img)).copy()
+        img_aug = self.geo_aug_func.augment_image(np.array(img)).copy()
+        return transforms.ToTensor()(img_aug)
 
 class EMA():
     def __init__(self, beta):
