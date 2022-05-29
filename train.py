@@ -1,4 +1,4 @@
-from model import Unet, GaussianDiffusion, EMA, Dataset, cycle, DataParallelPassthrough, sample_images
+from model import Unet, GaussianDiffusion, EMA, Dataset, cycle, DataParallelPassthrough, sample_images, AverageMeters
 import argparse
 import torch
 import torch.nn as nn
@@ -61,6 +61,7 @@ class Trainer(object):
         self.results_folder.mkdir(exist_ok = True)
 
         self.reset_parameters()
+        self.loss_meter = AverageMeters()
 
     def reset_parameters(self):
         self.ema_model.load_state_dict(self.model.state_dict())
@@ -106,9 +107,15 @@ class Trainer(object):
                     if args.distillation_type != 'none':
                         loss_stu = loss_dict['loss_stu'].mean()
                         loss_tea = loss_dict['loss_tea'].mean()
-                        pbar.set_description(f'stu {loss_stu.item():.4f}, tea {loss_tea.item():.4f}')
+                        self.loss_meter.update('loss_stu', loss_stu.item())
+                        self.loss_meter.update('loss_tea', loss_tea.item())
+                        avg_loss_stu = self.loss_meter.avg['disp']['loss_stu']
+                        avg_loss_tea = self.loss_meter.avg['disp']['loss_tea']
+                        pbar.set_description(f's {loss_stu.item():.3f}/{avg_loss_stu:.3f}, t {loss_tea.item():.3f}/{avg_loss_tea:.3f}')
                     else:
-                        pbar.set_description(f'loss: {loss.item():.4f}')
+                        self.loss_meter.update('loss', loss.item())
+                        avg_loss = self.loss_meter.avg['disp']['loss']
+                        pbar.set_description(f'loss: {loss.item():.3f}/{avg_loss:.3f}')
 
                 self.scaler.step(self.opt)
                 self.scaler.update()
@@ -118,6 +125,7 @@ class Trainer(object):
                     self.step_ema()
 
                 if self.step != 0 and self.step % self.save_and_sample_every == 0:
+                    self.loss_meter.disp_reset()
                     # ema_model: GaussianDiffusion
                     self.ema_model.eval()
 

@@ -183,3 +183,42 @@ def dual_teaching_loss(img_gt, img_stu, img_tea):
         # The distillation loss from the student to the teacher is given a smaller weight.
 
     return loss_distill
+
+class AverageMeters:
+    """Computes and stores the average and current values of given keys"""
+    def __init__(self):
+        self.total_reset()
+
+    def total_reset(self):
+        self.val   = {'total': {}, 'disp': {}}
+        self.avg   = {'total': {}, 'disp': {}}
+        self.sum   = {'total': {}, 'disp': {}}
+        self.count = {'total': {}, 'disp': {}}
+
+    def disp_reset(self):
+        self.val['disp']   = {}
+        self.avg['disp']   = {}
+        self.sum['disp']   = {}
+        self.count['disp'] = {}
+
+    def update(self, key, val, n=1, is_val_avg=True):
+        if type(val) == torch.Tensor:
+            val = val.item()
+        if type(n) == torch.Tensor:
+            n = n.item()
+
+        if np.isnan(val):
+            breakpoint()
+
+        for sig in ('total', 'disp'):
+            self.val[sig][key]    = val
+            self.sum[sig].setdefault(key, 0)
+            self.count[sig].setdefault(key, 0.0001)
+            self.avg[sig].setdefault(key, 0)
+            if is_val_avg:
+                self.sum[sig][key] += val * n
+            else:
+                self.sum[sig][key] += val
+
+            self.count[sig][key] += n
+            self.avg[sig][key]    = self.sum[sig][key] / self.count[sig][key]
