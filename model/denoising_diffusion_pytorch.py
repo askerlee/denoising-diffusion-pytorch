@@ -520,7 +520,7 @@ class GaussianDiffusion(nn.Module):
         self.denoise_fn = denoise_fn    # Unet
         self.objective = objective
         self.distillation_type = distillation_type
-        self.distill_t_frac = distill_t_frac if self.distillation_type is not 'none' else -1
+        self.distill_t_frac = distill_t_frac if self.distillation_type != 'none' else -1
         self.align_tea_stu_feat_weight = align_tea_stu_feat_weight
 
         betas = cosine_beta_schedule(timesteps)
@@ -651,7 +651,7 @@ class GaussianDiffusion(nn.Module):
         #x_start_weight = extract_tensor(self.sqrt_alphas_cumprod, t.flatten(), x_start.shape).reshape(t.shape)
         #noise_weight   = extract_tensor(self.sqrt_one_minus_alphas_cumprod, t.flatten(), x_start.shape).reshape(t.shape)
         # t serves as a tensor of indices, to extract elements from alphas_cumprod.
-        alphas_cumprod  = extract_tensor(self.alphas_cumprod, t, x_start.shape).reshape(t.shape)
+        alphas_cumprod  = extract_tensor(self.alphas_cumprod, t, x_start.shape)
         x_start_weight  = torch.sqrt(alphas_cumprod)
         noise_weight    = torch.sqrt(1 - alphas_cumprod)
         x_noisy1 = x_start_weight * x_start + noise_weight * noise
@@ -667,7 +667,7 @@ class GaussianDiffusion(nn.Module):
             else:
                 # Do conventional sampling, as well as an easier x2 according to a t2 < t.
                 t2 = (t * distill_t_frac).long()
-                alphas_cumprod2 = extract_tensor(self.alphas_cumprod, t2, x_start.shape).reshape(t2.shape)
+                alphas_cumprod2 = extract_tensor(self.alphas_cumprod, t2, x_start.shape)
                 x_start_weight2 = torch.sqrt(alphas_cumprod2)
                 noise_weight2   = torch.sqrt(1 - alphas_cumprod2)
                 x_noisy2 = x_start_weight2 * x_start + noise_weight2 * noise
