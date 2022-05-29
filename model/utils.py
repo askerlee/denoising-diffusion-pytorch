@@ -96,7 +96,7 @@ class Dataset(data.Dataset):
         path = self.paths[index]
         img = np.array(Image.open(path))
         img_aug = self.geo_aug_func.augment_image(np.array(img)).copy()
-        return self.tv_transform()(img_aug)
+        return self.tv_transform(img_aug)
 
 class EMA():
     def __init__(self, beta):
