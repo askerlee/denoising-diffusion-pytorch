@@ -8,7 +8,7 @@ import numpy as np
 import timm
 from .laplacian import LapLoss
 import imgaug.augmenters as iaa
-from torchvision.transforms import ColorJitter, ToTensor
+from torchvision.transforms import ColorJitter, ToTensor, ToPILImage
 
 def cycle(dl):
     while True:
@@ -85,8 +85,9 @@ class Dataset(data.Dataset):
                 ])
 
         self.tv_transform = transforms.Compose([
+            ToPILImage(),
             ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.5/3.14),
-            transforms.ToTensor()
+            ToTensor()
         ])
 
     def __len__(self):
