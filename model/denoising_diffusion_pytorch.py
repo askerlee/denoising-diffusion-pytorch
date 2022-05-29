@@ -245,7 +245,7 @@ class Unet(nn.Module):
         memory_size = 1024,
         learned_variance = False,
         distillation_type = 'none',
-        finetune_tea_feat_ext = True,
+        finetune_tea_feat_ext = False,
     ):
         super().__init__()
 
@@ -366,7 +366,7 @@ class Unet(nn.Module):
             nn.Conv2d(dim, self.out_dim, 1)
         )
 
-    def extract_distill_feat(self, feat_extractor, img, mid_feat, do_finetune=True):
+    def extract_distill_feat(self, feat_extractor, img, mid_feat, do_finetune=False):
         if self.distillation_type == 'none':
             # Just return an empty tensor.
             return torch.zeros_like(mid_feat[:, []])
@@ -377,11 +377,11 @@ class Unet(nn.Module):
             distill_feat = img
         else:
             if do_finetune:
+                distill_feat = timm_extract_features(feat_extractor, img)
+            else:
                 # Wrap the feature extraction with no_grad() to save RAM.
                 with torch.no_grad():
-                    distill_feat = timm_extract_features(feat_extractor, img)
-            else:
-                distill_feat = timm_extract_features(feat_extractor, img)
+                    distill_feat = timm_extract_features(feat_extractor, img)                
 
         # For 128x128 images, vit features are 4x4. Resize to 16x16.
         distill_feat = F.interpolate(distill_feat, size=mid_feat.shape[2:], mode='bilinear', align_corners=False)

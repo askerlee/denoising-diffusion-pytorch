@@ -144,7 +144,8 @@ parser.add_argument('--lr', type=float, default=2e-4, help="Learning rate")
 parser.add_argument('--bs', type=int, default=32, help="Batch size")
 parser.add_argument('--cp', type=str, dest='cp_path', default=None, help="The path of a model checkpoint")
 parser.add_argument('--sample', dest='sample_only', action='store_true', help='Do sampling using a trained model')
-parser.add_argument('--workers', dest='num_workers', type=int, default=4, help="Number of workers for data loading")
+parser.add_argument('--workers', dest='num_workers', type=int, default=5, 
+                    help="Number of workers for data loading. On machines with slower disk IO, this should be higher.")
 
 parser.add_argument('--gpus', type=int, nargs='+', default=[0, 1])
 parser.add_argument('--noamp', dest='amp', default=True, action='store_false', help='Do not use mixed precision')
