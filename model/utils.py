@@ -61,11 +61,11 @@ class Dataset(data.Dataset):
                     iaa.Resize({'height': tgt_height, 'width': tgt_width}),
                     # apply the following augmenters to most images
                     iaa.Fliplr(0.5),  # Horizontally flip 50% of all images
-                    iaa.Flipud(0.5),  # Vertically flip 50% of all images
-                    iaa.Sometimes(0.2, iaa.Rot90((1, 3))), # Randomly rotate 90, 180, 270 degrees 30% of the time
+                    # iaa.Flipud(0.5),  # Vertically flip 50% of all images
+                    # iaa.Sometimes(0.2, iaa.Rot90((1, 3))), # Randomly rotate 90, 180, 270 degrees 30% of the time
                     # Affine transformation reduces dice by ~1%. So disable it by setting affine_prob=0.
                     iaa.Sometimes(affine_prob, iaa.Affine(
-                            rotate=(-45, 45), # rotate by -45 to +45 degrees
+                            rotate=(-20, 20), # rotate by -45 to +45 degrees
                             shear=(-16, 16), # shear by -16 to +16 degrees
                             order=1,
                             cval=(0,255),
