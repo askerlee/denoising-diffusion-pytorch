@@ -393,14 +393,8 @@ class Unet(nn.Module):
         # t: time embedding.
         if exists(self.time_mlp):
             t = self.time_mlp(time.flatten())
-            # When do training, time is 3-d [batch, h_grid, w_grid].
-            if time.ndim == 3:
-                # t: [batch, h_grid, w_grid, time_dim=256].
-                t = t.view(*(time.shape), -1)
-            # When do sampling, time is 1-d [batch].
-            else:
-                # t: [batch, 1, 1, time_dim=256].
-                t = t.view(time.shape[0], *((1,) * (len(x.shape) - 2)), -1)
+            # t: [batch, 1, 1, time_dim=256].
+            t = t.view(time.shape[0], *((1,) * (len(x.shape) - 2)), -1)
         else:
             t = None
 
@@ -507,8 +501,8 @@ class GaussianDiffusion(nn.Module):
         timesteps = 1000,
         loss_type = 'l1',
         objective = 'pred_noise',
-        noise_grid_num = 1,
         distillation_type = 'none',
+        distill_t_frac = 0.,
         align_tea_stu_feat_weight = 0,
     ):
         super().__init__()
@@ -525,8 +519,8 @@ class GaussianDiffusion(nn.Module):
         self.image_size = image_size
         self.denoise_fn = denoise_fn    # Unet
         self.objective = objective
-        self.noise_grid_num = noise_grid_num
         self.distillation_type = distillation_type
+        self.distill_t_frac = distill_t_frac if self.distillation_type is not 'none' else -1
         self.align_tea_stu_feat_weight = align_tea_stu_feat_weight
 
         betas = cosine_beta_schedule(timesteps)
@@ -650,22 +644,35 @@ class GaussianDiffusion(nn.Module):
         return img
 
     # inject random noise into x_start. sqrt_one_minus_alphas_cumprod_t is the std of the noise.
-    def q_sample(self, x_start, t, noise=None):
+    def q_sample(self, x_start, t, noise=None, distill_t_frac=-1):
+        assert distill_t_frac <= 1
+
         noise = default(noise, lambda: torch.randn_like(x_start))
-        t = t.unsqueeze(1)
-        # t serves as a tensor of indices, to extract elements from sqrt_alphas_cumprod.
-        x_start_weight = extract_tensor(self.sqrt_alphas_cumprod, t.flatten(), x_start.shape).reshape(t.shape)
-        noise_weight   = extract_tensor(self.sqrt_one_minus_alphas_cumprod, t.flatten(), x_start.shape).reshape(t.shape)
+        #x_start_weight = extract_tensor(self.sqrt_alphas_cumprod, t.flatten(), x_start.shape).reshape(t.shape)
+        #noise_weight   = extract_tensor(self.sqrt_one_minus_alphas_cumprod, t.flatten(), x_start.shape).reshape(t.shape)
+        # t serves as a tensor of indices, to extract elements from alphas_cumprod.
+        alphas_cumprod  = extract_tensor(self.alphas_cumprod, t, x_start.shape).reshape(t.shape)
+        x_start_weight  = torch.sqrt(alphas_cumprod)
+        noise_weight    = torch.sqrt(1 - alphas_cumprod)
+        x_noisy1 = x_start_weight * x_start + noise_weight * noise
 
-        if t.shape[2] > 1 or t.shape[3] > 1:
-            # repeat noise weights and x_start weights to have the same size as x_start.
-            x_start_weight = repeat_interleave(repeat_interleave(x_start_weight, x_start.shape[2] // t.shape[2], dim=2), 
-                                               x_start.shape[3] // t.shape[3], dim=3)
-            noise_weight   = repeat_interleave(repeat_interleave(noise_weight, x_start.shape[2] // t.shape[2], dim = 2), 
-                                               x_start.shape[3] // t.shape[3], dim=3)
-        # if t has shape [1, 1], the it will be broadcasted to [b, c, h, w]. No need to repeat.
+        # Conventional sampling. Do not sample for an easier t.
+        if distill_t_frac == -1:
+            return x_noisy1
+            
+        else:
+            # No noise is added to x_noisy2.
+            if distill_t_frac == 0:
+                x_noisy2 = x_start
+            else:
+                # Do conventional sampling, as well as an easier x2 according to a t2 < t.
+                t2 = (t * distill_t_frac).long()
+                alphas_cumprod2 = extract_tensor(self.alphas_cumprod, t2, x_start.shape).reshape(t2.shape)
+                x_start_weight2 = torch.sqrt(alphas_cumprod2)
+                noise_weight2   = torch.sqrt(1 - alphas_cumprod2)
+                x_noisy2 = x_start_weight2 * x_start + noise_weight2 * noise
 
-        return x_start_weight * x_start + noise_weight * noise
+            return x_noisy1, x_noisy2
 
     # LapLoss doesn't work.
     def laploss(self, x_pred, x):
@@ -697,7 +704,14 @@ class GaussianDiffusion(nn.Module):
         # noise: a Gaussian noise for each pixel.
         noise = default(noise, lambda: torch.randn_like(x_start))
 
-        x = self.q_sample(x_start=x_start, t=t, noise=noise)
+        x_noisy = self.q_sample(x_start=x_start, t=t, noise=noise, distill_t_frac=self.distill_t_frac)
+        # Sample an easier x2 according to a smaller t.
+        if self.distill_t_frac == -1:
+            x   = x_noisy
+            x2  = None
+        else:
+            x, x2 = x_noisy
+
         if self.distillation_type != 'none':
             if self.objective == 'pred_noise':
                 # Using noise performs worse.
@@ -710,7 +724,7 @@ class GaussianDiffusion(nn.Module):
                 breakpoint()
         else:
             img_gt = None
-        model_output_dict = self.denoise_fn(x, t, img_gt)
+        model_output_dict = self.denoise_fn(x, t, x2)
         pred_stu, pred_tea  = model_output_dict['pred_stu'], model_output_dict['pred_tea']
         noise_feat, gt_feat = model_output_dict['noise_feat'], model_output_dict['gt_feat']
 
@@ -755,8 +769,7 @@ class GaussianDiffusion(nn.Module):
             
         # t: random numbers of steps between 0 and num_timesteps - 1 (num_timesteps default is 1000)
         # (b,): different random steps for different images in a batch.
-        t = torch.randint(0, self.num_timesteps, (b, self.noise_grid_num, self.noise_grid_num), 
-                          device=device).long()
+        t = torch.randint(0, self.num_timesteps, (b, ), device=device).long()
 
         img = normalize_to_neg_one_to_one(img)
         return self.p_losses(img, t, *args, **kwargs)

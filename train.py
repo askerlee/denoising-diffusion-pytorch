@@ -159,7 +159,6 @@ parser.add_argument('--losstype', dest='loss_type', type=str, choices=['l1', 'l2
                     help="Type of image denoising loss")
 parser.add_argument('--obj', dest='objective_type', type=str, choices=['pred_noise', 'pred_x0'], default='pred_noise', 
                     help="Type of denoising objective")
-parser.add_argument('--noisegrid', dest='noise_grid_num', type=int, default=1, help="Number of noise grid per axis per image")
 parser.add_argument('--sampinterval', dest='save_sample_interval', type=int, default=1000, 
                     help="Every N iterations, save model and sample example images")
 parser.add_argument('--distill', dest='distillation_type', 
@@ -168,6 +167,8 @@ parser.add_argument('--distill', dest='distillation_type',
                     default='vit_tiny_patch16_224', 
                     help='Do distillation: use a miniature or features of original images to train a teacher model, '
                          'which makes the model converge faster.')
+parser.add_argument('--dtfrac', dest='distill_t_frac', default=0.0, type=float, 
+                    help='Fraction of t of noise to be added to teacher images (default: 0, groundtruth images)')   
 parser.add_argument('--tuneteacher', dest='finetune_tea_feat_ext', default=False, action='store_true', 
                     help='Fine-tune the pretrained image feature extractor of the teacher model (default: freeze it).')
 parser.add_argument('--alignfeat', dest='align_tea_stu_feat_weight', default=0.0, type=float, 
@@ -197,13 +198,11 @@ diffusion = GaussianDiffusion(
     timesteps = args.timesteps,     # number of maximum diffusion steps
     loss_type = args.loss_type,     # lap (Laplacian), L1 or L2
     objective = args.objective_type,  # objective type, pred_noise or pred_x0
-    # noise_grid_num: default 1, same time t for a whole image. 
-    # If > 1, divide the image into N*N grids, and each grid has a separate t.
-    noise_grid_num = args.noise_grid_num, 
     # if distillation_type=='mini', use a miniature of original images as privileged information to train the teacher model.
     # if distillation_type=='resnet34' or another model name, 
     # use image features extracted with a pretrained model to train the teacher model.
     distillation_type = args.distillation_type,   
+    distill_t_frac = args.distill_t_frac,
     align_tea_stu_feat_weight = args.align_tea_stu_feat_weight
 )
 
