@@ -8,7 +8,7 @@ import numpy as np
 import timm
 from .laplacian import LapLoss
 import imgaug.augmenters as iaa
-from torchvision.transforms import ColorJitter
+from torchvision.transforms import ColorJitter, ToTensor
 
 def cycle(dl):
     while True:
@@ -84,7 +84,10 @@ class Dataset(data.Dataset):
                     # iaa.CropToFixedSize(width=tgt_width, height=tgt_height),
                 ])
 
-        self.color_fun          = ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.5/3.14)
+        self.tv_transform = transforms.Compose([
+            ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.5/3.14),
+            transforms.ToTensor()
+        ])
 
     def __len__(self):
         return len(self.paths)
@@ -93,7 +96,7 @@ class Dataset(data.Dataset):
         path = self.paths[index]
         img = np.array(Image.open(path))
         img_aug = self.geo_aug_func.augment_image(np.array(img)).copy()
-        return transforms.ToTensor()(img_aug)
+        return self.tv_transform()(img_aug)
 
 class EMA():
     def __init__(self, beta):
