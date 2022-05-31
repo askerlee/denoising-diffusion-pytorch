@@ -797,7 +797,7 @@ class GaussianDiffusion(nn.Module):
             else:
                 loss_align_tea_stu = 0
         else:
-            loss_tea = 0
+            loss_tea = torch.tensor(0, device=x_start.device)
             loss_align_tea_stu = 0
 
         loss = loss_stu + loss_tea + self.align_tea_stu_feat_weight * loss_align_tea_stu
