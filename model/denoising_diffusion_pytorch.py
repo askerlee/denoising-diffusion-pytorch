@@ -745,9 +745,9 @@ class GaussianDiffusion(nn.Module):
             x, x2 = x_noisy
 
         if self.debug and step < 10:
-            utils.save_image(x, f'{self.output_dir}/x_noisy-{step}.png')
+            utils.save_image(x, f'{self.output_dir}/{step}-stu.png')
             if x2 is not None:
-                utils.save_image(x2, f'{self.output_dir}/x2_noisy-{step}.png')
+                utils.save_image(x2, f'{self.output_dir}/{step}-tea.png')
 
         if self.distillation_type != 'none':
             if self.objective == 'pred_noise':
