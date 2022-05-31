@@ -700,6 +700,10 @@ class GaussianDiffusion(nn.Module):
                 noise_weight2   = torch.sqrt(1 - alphas_cumprod2)
                 x_noisy2 = x_start_weight2 * x_start + noise_weight2 * noise
 
+                if self.debug and step < 10:
+                    print(f'{step} x_start_weight2\n{x_start_weight2.flatten()}')
+                    print(f'{step} noise_weight2\n{noise_weight2.flatten()}')
+
             return x_noisy1, x_noisy2
 
     # LapLoss doesn't work.
