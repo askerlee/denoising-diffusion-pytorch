@@ -6,7 +6,6 @@ import torch.optim as optim
 from torch.cuda.amp import autocast, GradScaler
 from torch.optim import Adam
 from torch.utils import data
-from torchvision import utils
 import os
 import copy
 from tqdm import tqdm
@@ -97,7 +96,7 @@ class Trainer(object):
                     data = next(self.dl).cuda()
 
                     with autocast(enabled = self.amp):
-                        loss_dict = self.model(data)
+                        loss_dict = self.model(data, step=self.step)
                         # For multiple GPUs, loss is a list.
                         # Since the loss on each GPU is MAE per pixel, we should also average them here,
                         # to make the loss consistent with being on a single GPU.
@@ -146,6 +145,7 @@ parser.add_argument('--cp', type=str, dest='cp_path', default=None, help="The pa
 parser.add_argument('--sample', dest='sample_only', action='store_true', help='Do sampling using a trained model')
 parser.add_argument('--workers', dest='num_workers', type=int, default=5, 
                     help="Number of workers for data loading. On machines with slower disk IO, this should be higher.")
+parser.add_argument('--debug', action='store_true', help='Debug the diffusion process')
 
 parser.add_argument('--gpus', type=int, nargs='+', default=[0, 1])
 parser.add_argument('--noamp', dest='amp', default=True, action='store_false', help='Do not use mixed precision')
@@ -178,6 +178,7 @@ parser.add_argument('--alignfeat', dest='align_tea_stu_feat_weight', default=0.0
 
 args = parser.parse_args()
 print(f"Args:\n{args}")
+torch.set_printoptions(sci_mode=False)
 
 unet = Unet(
     dim = 64,
@@ -204,7 +205,9 @@ diffusion = GaussianDiffusion(
     # use image features extracted with a pretrained model to train the teacher model.
     distillation_type = args.distillation_type,   
     distill_t_frac = args.distill_t_frac,
-    align_tea_stu_feat_weight = args.align_tea_stu_feat_weight
+    align_tea_stu_feat_weight = args.align_tea_stu_feat_weight,
+    output_dir = args.results_folder,
+    debug = args.debug,
 )
 
 # default using two GPUs.

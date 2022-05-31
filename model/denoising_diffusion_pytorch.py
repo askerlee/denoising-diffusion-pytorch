@@ -1,7 +1,9 @@
 import math
 import torch
 from torch import nn, einsum
+from torch.nn import Parameter
 import torch.nn.functional as F
+from torchvision import utils
 from inspect import isfunction
 from functools import partial
 
@@ -504,6 +506,8 @@ class GaussianDiffusion(nn.Module):
         distillation_type = 'none',
         distill_t_frac = 0.,
         align_tea_stu_feat_weight = 0,
+        output_dir = './results',
+        debug = False,
     ):
         super().__init__()
         if isinstance(denoise_fn, torch.nn.DataParallel):
@@ -522,6 +526,8 @@ class GaussianDiffusion(nn.Module):
         self.distillation_type = distillation_type
         self.distill_t_frac = distill_t_frac if self.distillation_type != 'none' else -1
         self.align_tea_stu_feat_weight = align_tea_stu_feat_weight
+        self.output_dir = output_dir
+        self.debug = debug
 
         betas = cosine_beta_schedule(timesteps)
 
@@ -644,7 +650,7 @@ class GaussianDiffusion(nn.Module):
         return img
 
     # inject random noise into x_start. sqrt_one_minus_alphas_cumprod_t is the std of the noise.
-    def q_sample(self, x_start, t, noise=None, distill_t_frac=-1):
+    def q_sample(self, x_start, t, noise=None, distill_t_frac=-1, step=0):
         assert distill_t_frac <= 1
 
         noise = default(noise, lambda: torch.randn_like(x_start))
@@ -655,6 +661,10 @@ class GaussianDiffusion(nn.Module):
         x_start_weight  = torch.sqrt(alphas_cumprod)
         noise_weight    = torch.sqrt(1 - alphas_cumprod)
         x_noisy1 = x_start_weight * x_start + noise_weight * noise
+
+        if self.debug and step < 10:
+            print(f'x_start_weight: {x_start_weight}')
+            print(f'noise_weight: {noise_weight}')
 
         # Conventional sampling. Do not sample for an easier t.
         if distill_t_frac == -1:
@@ -699,7 +709,7 @@ class GaussianDiffusion(nn.Module):
             raise ValueError(f'invalid loss type {self.loss_type}')
 
     # x_start: initial image.
-    def p_losses(self, x_start, t, noise = None):
+    def p_losses(self, x_start, t, noise = None, step=0):
         b, c, h, w = x_start.shape
         # noise: a Gaussian noise for each pixel.
         noise = default(noise, lambda: torch.randn_like(x_start))
@@ -711,6 +721,11 @@ class GaussianDiffusion(nn.Module):
             x2  = None
         else:
             x, x2 = x_noisy
+
+        if self.debug and step < 10:
+            utils.save_image(x, f'{self.output_dir}/x_noisy-{step}.png')
+            if x2 is not None:
+                utils.save_image(x2, f'{self.output_dir}/x2_noisy-{step}.png')
 
         if self.distillation_type != 'none':
             if self.objective == 'pred_noise':
