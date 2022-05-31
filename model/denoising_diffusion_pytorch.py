@@ -537,14 +537,15 @@ class GaussianDiffusion(nn.Module):
         self.output_dir = output_dir
         self.debug = debug
         self.num_timesteps = num_timesteps
-
+        self.alpha_beta_schedule = alpha_beta_schedule
+        
         if self.alpha_beta_schedule == 'cosine':
             betas = cosine_beta_schedule(self.num_timesteps)
         elif self.alpha_beta_schedule == 'linear':
             betas = linear_alpha_schedule(self.num_timesteps)
         else:
             breakpoint()
-            
+
         alphas = 1. - betas
         alphas_cumprod = torch.cumprod(alphas, axis=0)
         alphas_cumprod_prev = F.pad(alphas_cumprod[:-1], (1, 0), value = 1.)
