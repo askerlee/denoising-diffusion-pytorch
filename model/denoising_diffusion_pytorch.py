@@ -348,7 +348,8 @@ class Unet(nn.Module):
                 Upsample(dim_in) if not is_last else nn.Identity()
             ]))
 
-        self.tea_share_ups = True
+        # Sharing ups seems to perform worse.
+        self.tea_share_ups = False
         if self.tea_share_ups:
             self.ups_tea = self.ups
         else:
