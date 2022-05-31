@@ -151,10 +151,12 @@ parser.add_argument('--gpus', type=int, nargs='+', default=[0, 1])
 parser.add_argument('--noamp', dest='amp', default=True, action='store_false', help='Do not use mixed precision')
 parser.add_argument('--ds', type=str, default='imagenet', help="The path of training dataset")
 parser.add_argument('--results_folder', type=str, default='results', help="The path to save checkpoints and sampled images")
-parser.add_argument('--times', dest='timesteps', type=int, default=1000, 
+parser.add_argument('--times', dest='num_timesteps', type=int, default=1000, 
                     help="Number of maximum diffusion steps")
 parser.add_argument('--mem', dest='memory_size', type=int, default=1024, 
                     help="Number of memory cells in each attention layer")
+parser.add_argument('--absched', dest='alpha_beta_schedule', type=str, choices=['cosine', 'linear'], default='cosine', 
+                    help="Type of alpha/beta schedule")
 
 parser.add_argument('--losstype', dest='loss_type', type=str, choices=['l1', 'l2', 'lap'], default='l1', 
                     help="Type of image denoising loss")
@@ -195,11 +197,12 @@ unet = Unet(
 )
 
 diffusion = GaussianDiffusion(
-    unet,                           # denoise_fn
-    image_size = 128,               # Input image is resized to image_size before augmentation.
-    timesteps = args.timesteps,     # number of maximum diffusion steps
-    loss_type = args.loss_type,     # lap (Laplacian), L1 or L2
-    objective = args.objective_type,  # objective type, pred_noise or pred_x0
+    unet,                               # denoise_fn
+    image_size = 128,                   # Input image is resized to image_size before augmentation.
+    num_timesteps = args.num_timesteps, # number of maximum diffusion steps
+    alpha_beta_schedule = args.alpha_beta_schedule, # alpha/beta schedule
+    loss_type = args.loss_type,         # L1, L2, lap (Laplacian)
+    objective = args.objective_type,    # objective type, pred_noise or pred_x0
     # if distillation_type=='mini', use a miniature of original images as privileged information to train the teacher model.
     # if distillation_type=='resnet34' or another model name, 
     # use image features extracted with a pretrained model to train the teacher model.

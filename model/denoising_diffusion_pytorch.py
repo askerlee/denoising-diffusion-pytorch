@@ -481,14 +481,21 @@ def noise_like(shape, device, repeat=False):
     noise = lambda: torch.randn(shape, device=device)
     return repeat_noise() if repeat else noise()
 
-def cosine_beta_schedule(timesteps, s = 0.008):
+def cosine_beta_schedule(num_timesteps, s = 0.008):
     """
     cosine schedule
     as proposed in https://openreview.net/forum?id=-NEXDKk8gZ
     """
-    steps = timesteps + 1
-    x = torch.linspace(0, timesteps, steps, dtype = torch.float64)
-    alphas_cumprod = torch.cos(((x / timesteps) + s) / (1 + s) * torch.pi * 0.5) ** 2
+    steps = num_timesteps + 1
+    x = torch.linspace(0, num_timesteps, steps, dtype = torch.float64)
+    alphas_cumprod = torch.cos(((x / num_timesteps) + s) / (1 + s) * torch.pi * 0.5) ** 2
+    alphas_cumprod = alphas_cumprod / alphas_cumprod[0]
+    betas = 1 - (alphas_cumprod[1:] / alphas_cumprod[:-1])
+    return torch.clip(betas, 0, 0.999)
+
+def linear_alpha_schedule(num_timesteps, s = 0.008):
+    steps = num_timesteps + 1
+    alphas_cumprod = torch.linspace(1, 0, steps, dtype = torch.float64)
     alphas_cumprod = alphas_cumprod / alphas_cumprod[0]
     betas = 1 - (alphas_cumprod[1:] / alphas_cumprod[:-1])
     return torch.clip(betas, 0, 0.999)
@@ -500,7 +507,8 @@ class GaussianDiffusion(nn.Module):
         *,
         image_size,
         channels = 3,
-        timesteps = 1000,
+        num_timesteps = 1000,
+        alpha_beta_schedule = 'cosine',
         loss_type = 'l1',
         objective = 'pred_noise',
         distillation_type = 'none',
@@ -528,15 +536,19 @@ class GaussianDiffusion(nn.Module):
         self.align_tea_stu_feat_weight = align_tea_stu_feat_weight
         self.output_dir = output_dir
         self.debug = debug
+        self.num_timesteps = num_timesteps
 
-        betas = cosine_beta_schedule(timesteps)
-
+        if self.alpha_beta_schedule == 'cosine':
+            betas = cosine_beta_schedule(self.num_timesteps)
+        elif self.alpha_beta_schedule == 'linear':
+            betas = linear_alpha_schedule(self.num_timesteps)
+        else:
+            breakpoint()
+            
         alphas = 1. - betas
         alphas_cumprod = torch.cumprod(alphas, axis=0)
         alphas_cumprod_prev = F.pad(alphas_cumprod[:-1], (1, 0), value = 1.)
 
-        timesteps, = betas.shape
-        self.num_timesteps = int(timesteps)
         self.loss_type = loss_type
         self.laploss_fun    = LapLoss()
         
