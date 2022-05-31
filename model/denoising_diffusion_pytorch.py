@@ -714,7 +714,7 @@ class GaussianDiffusion(nn.Module):
         # noise: a Gaussian noise for each pixel.
         noise = default(noise, lambda: torch.randn_like(x_start))
 
-        x_noisy = self.q_sample(x_start=x_start, t=t, noise=noise, distill_t_frac=self.distill_t_frac)
+        x_noisy = self.q_sample(x_start=x_start, t=t, noise=noise, distill_t_frac=self.distill_t_frac, step=step)
         # Sample an easier x2 according to a smaller t.
         if self.distill_t_frac == -1:
             x   = x_noisy
