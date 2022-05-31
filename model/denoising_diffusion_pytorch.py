@@ -663,8 +663,8 @@ class GaussianDiffusion(nn.Module):
         x_noisy1 = x_start_weight * x_start + noise_weight * noise
 
         if self.debug and step < 10:
-            print(f'x_start_weight: {x_start_weight}')
-            print(f'noise_weight: {noise_weight}')
+            print(f'x_start_weight: {x_start_weight.flatten()}')
+            print(f'noise_weight: {noise_weight.flatten()}')
 
         # Conventional sampling. Do not sample for an easier t.
         if distill_t_frac == -1:
