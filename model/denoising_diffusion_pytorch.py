@@ -496,12 +496,17 @@ def cosine_beta_schedule(num_timesteps, s = 0.008):
     betas = 1 - (alphas_cumprod[1:] / alphas_cumprod[:-1])
     return torch.clip(betas, 0, 0.999)
 
-def linear_alpha_schedule(num_timesteps, s = 0.008):
+def linear_alpha_schedule(num_timesteps):
     steps = num_timesteps + 1
     alphas_cumprod = torch.linspace(1, 0, steps, dtype = torch.float64)
     alphas_cumprod = alphas_cumprod / alphas_cumprod[0]
     betas = 1 - (alphas_cumprod[1:] / alphas_cumprod[:-1])
     return torch.clip(betas, 0, 0.999)
+
+# Original schedule used in https://github.com/hojonathanho/diffusion
+def linear_beta_schedule(num_timesteps, beta_start=0.0001, beta_end=0.02):
+    betas = torch.linspace(beta_start, beta_end, num_timesteps, dtype=torch.float64)
+    return betas
 
 class GaussianDiffusion(nn.Module):
     def __init__(
@@ -511,7 +516,7 @@ class GaussianDiffusion(nn.Module):
         image_size,
         channels = 3,
         num_timesteps = 1000,
-        alpha_beta_schedule = 'cosine',
+        alpha_beta_schedule = 'linb',
         loss_type = 'l1',
         objective = 'pred_noise',
         distillation_type = 'none',
@@ -542,12 +547,15 @@ class GaussianDiffusion(nn.Module):
         self.num_timesteps = num_timesteps
         self.alpha_beta_schedule = alpha_beta_schedule
         
-        if self.alpha_beta_schedule == 'cosine':
+        if self.alpha_beta_schedule == 'cosb':
             print("Use cosine_beta_schedule")
             betas = cosine_beta_schedule(self.num_timesteps)
-        elif self.alpha_beta_schedule == 'linear':
+        elif self.alpha_beta_schedule == 'lina':
             print("Use linear_alpha_schedule")
             betas = linear_alpha_schedule(self.num_timesteps)
+        elif self.alpha_beta_schedule == 'linb':
+            print("Use linear_beta_schedule")
+            betas = linear_beta_schedule(self.num_timesteps)            
         else:
             breakpoint()
 
