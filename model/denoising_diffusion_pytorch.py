@@ -348,17 +348,20 @@ class Unet(nn.Module):
                 Upsample(dim_in) if not is_last else nn.Identity()
             ]))
 
+        self.tea_share_ups = True
+        if self.tea_share_ups:
+            self.ups_tea = self.ups
+        else:
+            for ind, (dim_in, dim_out) in enumerate(reversed(in_out[1:])):
+                is_last = ind >= (num_resolutions - 1)
+                # miniature image / image features as teacher's priviliged information.
 
-        for ind, (dim_in, dim_out) in enumerate(reversed(in_out[1:])):
-            is_last = ind >= (num_resolutions - 1)
-            # miniature image / image features as teacher's priviliged information.
-
-            self.ups_tea.append(nn.ModuleList([
-                block_klass(dim_out * 2 + extra_up_dims[ind], dim_in, time_emb_dim = time_dim),
-                block_klass(dim_in, dim_in, time_emb_dim = time_dim),
-                Residual(PreNorm(dim_in, LinearAttention(dim_in, memory_size=memory_size))),
-                Upsample(dim_in) if not is_last else nn.Identity()
-            ]))
+                self.ups_tea.append(nn.ModuleList([
+                    block_klass(dim_out * 2 + extra_up_dims[ind], dim_in, time_emb_dim = time_dim),
+                    block_klass(dim_in, dim_in, time_emb_dim = time_dim),
+                    Residual(PreNorm(dim_in, LinearAttention(dim_in, memory_size=memory_size))),
+                    Upsample(dim_in) if not is_last else nn.Identity()
+                ]))
 
         default_out_dim = channels * (1 if not learned_variance else 2)
         self.out_dim = default(out_dim, default_out_dim)
@@ -540,8 +543,10 @@ class GaussianDiffusion(nn.Module):
         self.alpha_beta_schedule = alpha_beta_schedule
         
         if self.alpha_beta_schedule == 'cosine':
+            print("Use cosine_beta_schedule")
             betas = cosine_beta_schedule(self.num_timesteps)
         elif self.alpha_beta_schedule == 'linear':
+            print("Use linear_alpha_schedule")
             betas = linear_alpha_schedule(self.num_timesteps)
         else:
             breakpoint()
