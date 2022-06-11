@@ -435,8 +435,9 @@ class Unet(nn.Module):
 
         if self.do_distillation:
         # Always fine-tune the student feature extractor.
-            noise_feat = self.extract_pre_feat(self.dist_feat_ext_stu, init_noise, mid_feat.shape, 
-                                            do_finetune=True)
+            noise_feat = self.extract_pre_feat(self.dist_feat_ext_stu, init_noise, 
+                                               mid_feat.shape[2:], 
+                                               do_finetune=True)
         else:
             noise_feat = None
 
@@ -460,7 +461,8 @@ class Unet(nn.Module):
         if self.do_distillation and img_tea is not None:
             x = mid_feat
             # finetune_tea_feat_ext controls whether to fine-tune the teacher feature extractor.
-            tea_feat = self.extract_pre_feat(self.dist_feat_ext_tea, img_tea, mid_feat.shape, 
+            tea_feat = self.extract_pre_feat(self.dist_feat_ext_tea, img_tea, 
+                                             mid_feat.shape[2:], 
                                              do_finetune=self.finetune_tea_feat_ext)
 
             for ind, (block1, block2, attn, upsample) in enumerate(self.ups_tea):
