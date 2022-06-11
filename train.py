@@ -103,18 +103,24 @@ class Trainer(object):
                         loss = loss_dict['loss'].mean()
                         self.scaler.scale(loss / self.gradient_accumulate_every).backward()
 
+                    loss_stu = loss_dict['loss_stu'].mean()
+                    avg_loss_stu = self.loss_meter.avg['disp']['loss_stu']
+                    self.loss_meter.update('loss_stu', loss_stu.item())
+                    desc_items = [ f's {loss_stu.item():.3f}/{avg_loss_stu:.3f}' ]
+                    
                     if args.do_distillation:
-                        loss_stu = loss_dict['loss_stu'].mean()
                         loss_tea = loss_dict['loss_tea'].mean()
-                        self.loss_meter.update('loss_stu', loss_stu.item())
                         self.loss_meter.update('loss_tea', loss_tea.item())
-                        avg_loss_stu = self.loss_meter.avg['disp']['loss_stu']
                         avg_loss_tea = self.loss_meter.avg['disp']['loss_tea']
-                        pbar.set_description(f's {loss_stu.item():.3f}/{avg_loss_stu:.3f}, t {loss_tea.item():.3f}/{avg_loss_tea:.3f}')
-                    else:
-                        self.loss_meter.update('loss', loss.item())
-                        avg_loss = self.loss_meter.avg['disp']['loss']
-                        pbar.set_description(f'loss: {loss.item():.3f}/{avg_loss:.3f}')
+                        desc_items.append( f't {loss_tea.item():.3f}/{avg_loss_tea:.3f}' )
+                    if args.interp_loss_weight > 0:
+                        loss_interp = loss_dict['loss_interp'].mean()
+                        self.loss_meter.update('loss_interp', loss_interp.item())
+                        avg_loss_interp = self.loss_meter.avg['disp']['loss_interp']
+                        desc_items.append( f'i {loss_interp.item():.3f}/{avg_loss_interp:.3f}' )
+
+                    desc = ', '.join(desc_items)
+                    pbar.set_description(desc)
 
                 self.scaler.step(self.opt)
                 self.scaler.update()
