@@ -176,8 +176,8 @@ parser.add_argument('--featnet', dest='featnet_type',
                     default='repvgg_b0', 
                     help='Type of the feature network. Used by the distillation and interpolation losses.')
 parser.add_argument('--distill', dest='do_distillation', action='store_true', help='Do distillation')                    
-parser.add_argument('--dtfrac', dest='distill_t_frac', default=0.0, type=float, 
-                    help='Fraction of t of noise to be added to teacher images (default: 0, groundtruth images)')   
+parser.add_argument('--dtfrac', dest='distill_t_frac', default=0.8, type=float, 
+                    help='Fraction of t of noise to be added to teacher images (the smaller, the less noise is added to groundtruth images)')   
 parser.add_argument('--tuneteacher', dest='finetune_tea_feat_ext', default=False, action='store_true', 
                     help='Fine-tune the pretrained image feature extractor of the teacher model (default: freeze it).')
 parser.add_argument('--alignfeat', dest='align_tea_stu_feat_weight', default=0.0, type=float, 
