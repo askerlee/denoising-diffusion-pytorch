@@ -167,7 +167,7 @@ parser.add_argument('--sampinterval', dest='save_sample_interval', type=int, def
 parser.add_argument('--featnet', dest='featnet_type', 
                     choices=[ 'none', 'mini', 'resnet34', 'resnet18', 'repvgg_b0', 
                               'mobilenetv2_120d', 'vit_base_patch8_224', 'vit_tiny_patch16_224' ], 
-                    default='vit_tiny_patch16_224', 
+                    default='repvgg_b0', 
                     help='Type of the feature network. Used by the distillation and interpolation losses.')
 parser.add_argument('--distill', dest='do_distillation', action='store_true', help='Do distillation')                    
 parser.add_argument('--dtfrac', dest='distill_t_frac', default=0.0, type=float, 
