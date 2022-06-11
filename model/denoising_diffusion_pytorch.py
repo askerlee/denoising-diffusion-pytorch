@@ -695,6 +695,9 @@ class GaussianDiffusion(nn.Module):
         assert b % 2 == 0
         b2 = b // 2
         x1, x2 = noisy_img[:b2], noisy_img[b2:]
+        t2 = t[:b2]
+        gt_feat1, gt_feat2 = gt_feat[:b2], gt_feat[b2:]
+
         w = torch.rand((b2, ), device=noisy_img.device)
         # Normalize w into [min_interp_w, 1-min_interp_w], i.e., [0.2, 0.8].
         w = (1 - 2 * min_interp_w) * w + min_interp_w
@@ -703,18 +706,17 @@ class GaussianDiffusion(nn.Module):
 
         # Setting the last param (img_gt) to None, so that teacher module won't be executed, 
         # to reduce unnecessary compute.
-        model_output_dict = self.denoise_fn(interp_img, t[:b2], None)
+        model_output_dict = self.denoise_fn(interp_img, t2, None)
         interp_pred = model_output_dict['pred_stu']
 
         if self.objective == 'pred_noise':
             # interp_pred is the predicted noises. Subtract it from interp_img to get the predicted image.
-            interp_pred = self.predict_start_from_noise(interp_img, t, interp_pred)
+            interp_pred = self.predict_start_from_noise(interp_img, t2, interp_pred)
         # otherwise, objective is 'pred_x0', and interp_pred is already the predicted image.
             
-        interp_feat = self.denoise_fn.extract_pre_feat(self.denoise_fn.dist_feat_ext_tea, interp_pred, gt_feat, 
+        interp_feat = self.denoise_fn.extract_pre_feat(self.denoise_fn.dist_feat_ext_tea, interp_pred, gt_feat1, 
                                                        do_finetune=False)
 
-        gt_feat1, gt_feat2 = gt_feat[:b2], gt_feat[b2:]
         loss_interp1 = self.loss_fn(interp_feat, gt_feat1, reduction='none')
         loss_interp2 = self.loss_fn(interp_feat, gt_feat2, reduction='none')
         # if neighbor_mask[i, pos] = 1, i.e., this pixel's feature is more similar to sub-batch1, 
