@@ -372,7 +372,9 @@ class Unet(nn.Module):
             nn.Conv2d(dim, self.out_dim, 1)
         )
 
-    def extract_distill_feat(self, feat_extractor, img, mid_feat, do_finetune=False):
+    # extract_pre_feat(): extract features using a pretrained model.
+    # mid_feat is only useful as a reference of the final feature shape and device.
+    def extract_pre_feat(self, feat_extractor, img, mid_feat, do_finetune=False):
         if self.distillation_type == 'none':
             # Just return an empty tensor.
             return torch.zeros_like(mid_feat[:, []])
@@ -427,7 +429,7 @@ class Unet(nn.Module):
         mid_feat = x
 
         # Always fine-tune the student feature extractor.
-        noise_feat = self.extract_distill_feat(self.dist_feat_ext_stu, init_noise, mid_feat, 
+        noise_feat = self.extract_pre_feat(self.dist_feat_ext_stu, init_noise, mid_feat, 
                                                do_finetune=True)
         for ind, (block1, block2, attn, upsample) in enumerate(self.ups):
             if ind == 0:
@@ -449,7 +451,7 @@ class Unet(nn.Module):
         if img_gt is not None:
             x = mid_feat
             # finetune_tea_feat_ext controls whether to fine-tune the teacher feature extractor.
-            gt_feat = self.extract_distill_feat(self.dist_feat_ext_tea, img_gt, mid_feat, 
+            gt_feat = self.extract_pre_feat(self.dist_feat_ext_tea, img_gt, mid_feat, 
                                                 do_finetune=self.finetune_tea_feat_ext)
 
             for ind, (block1, block2, attn, upsample) in enumerate(self.ups_tea):
@@ -522,6 +524,7 @@ class GaussianDiffusion(nn.Module):
         objective = 'pred_noise',
         distillation_type = 'none',
         distill_t_frac = 0.,
+        interp_loss_weight = 0.,
         align_tea_stu_feat_weight = 0,
         output_dir = './results',
         debug = False,
@@ -542,6 +545,7 @@ class GaussianDiffusion(nn.Module):
         self.objective = objective
         self.distillation_type = distillation_type
         self.distill_t_frac = distill_t_frac if self.distillation_type != 'none' else -1
+        self.interp_loss_weight = interp_loss_weight
         self.align_tea_stu_feat_weight = align_tea_stu_feat_weight
         self.output_dir = output_dir
         self.debug = debug
@@ -601,7 +605,7 @@ class GaussianDiffusion(nn.Module):
     # sqrt_recipm1_alphas_cumprod_t scales the noise std to to the same std used to generate the noise.
     def predict_start_from_noise(self, x_t, t, noise):
         return (
-            extract_tensor(self.sqrt_recip_alphas_cumprod, t, x_t.shape) * x_t -
+            extract_tensor(self.sqrt_recip_alphas_cumprod, t, x_t.shape)   * x_t -
             extract_tensor(self.sqrt_recipm1_alphas_cumprod, t, x_t.shape) * noise
         )
 
@@ -614,6 +618,7 @@ class GaussianDiffusion(nn.Module):
         posterior_log_variance_clipped = extract_tensor(self.posterior_log_variance_clipped, t, x_t.shape)
         return posterior_mean, posterior_variance, posterior_log_variance_clipped
 
+    # p_mean_variance() returns the denoised/generated image mean and noise variance.
     def p_mean_variance(self, x, t, clip_denoised: bool):
         model_output_dict = self.denoise_fn(x, t)
         model_output = model_output_dict['pred_stu']
@@ -632,6 +637,10 @@ class GaussianDiffusion(nn.Module):
         return model_mean, posterior_variance, posterior_log_variance
 
     # p_sample(), p_sample_loop(), sample() are used to do inference.
+    # p_sample() adds noise to image mean, according to noise variance.
+    # As p_sample() is called in every iteration in p_sample_loop(), 
+    # it results in a stochastic denoising trajectory,
+    # i.e., may generate different images given the same input noise.
     @torch.no_grad()
     def p_sample(self, x, t, clip_denoised=True, repeat_noise=False):
         b, *_, device = *x.shape, x.device
@@ -660,21 +669,64 @@ class GaussianDiffusion(nn.Module):
         channels = self.channels
         return self.p_sample_loop((batch_size, channels, image_size, image_size))
 
+    def noisy_interpolate(self, x1, x2, t_batch, w = 0.5):
+        assert x1.shape == x2.shape
+        # Apply the same t_batch to x1 and x2, respectively. 
+        # Otherwise it's difficult to deal with different time embeddings of xt1 and xt2.
+        xt1, xt2 = map(lambda x: self.q_sample(x, t=t_batch), (x1, x2))
+
+        interp_img = w * x1 + (1 - w) * x2 
+        return interp_img
+
     @torch.no_grad()
-    def interpolate(self, x1, x2, t = None, lam = 0.5):
+    def image_interpolate(self, x1, x2, t = None, w = 0.5):
         b, *_, device = *x1.shape, x1.device
         t = default(t, self.num_timesteps - 1)
-
-        assert x1.shape == x2.shape
-
-        t_batched = torch.stack([torch.tensor(t, device=device)] * b)
-        xt1, xt2 = map(lambda x: self.q_sample(x, t=t_batched), (x1, x2))
-
-        img = (1 - lam) * xt1 + lam * xt2
+        t_batch = torch.stack([torch.tensor(t, device=device)] * b)
+        img = self.noisy_interpolate(x1, x2, t_batch, w)
         for i in reversed(range(0, t)):
             img = self.p_sample(img, torch.full((b,), i, device=device, dtype=torch.long))
 
         return img
+
+    # x is already added with noises.
+    def calc_interpolation_loss(self, noisy_img, t, gt_feat, min_interp_w = 0.2):
+        b = noisy_img.shape[0]
+        assert b % 2 == 0
+        b2 = b // 2
+        x1, x2 = noisy_img[:b2], noisy_img[b2:]
+        w = torch.rand((b2, ), device=noisy_img.device)
+        # Normalize w into [min_interp_w, 1-min_interp_w], i.e., [0.2, 0.8].
+        w = (1 - 2 * min_interp_w) * w + min_interp_w
+        w = w.view(b2, *((1,) * (len(noisy_img.shape) - 1)))
+        interp_img = w * x1 + (1 - w) * x2 
+
+        # Setting the last param (img_gt) to None, so that teacher module won't be executed, 
+        # to reduce unnecessary compute.
+        model_output_dict = self.denoise_fn(interp_img, t[:b2], None)
+        interp_pred = model_output_dict['pred_stu']
+
+        if self.objective == 'pred_noise':
+            # interp_pred is the predicted noises. Subtract it from interp_img to get the predicted image.
+            interp_pred = self.predict_start_from_noise(interp_img, t, interp_pred)
+        # otherwise, objective is 'pred_x0', and interp_pred is already the predicted image.
+            
+        interp_feat = self.denoise_fn.extract_pre_feat(self.denoise_fn.dist_feat_ext_tea, interp_pred, gt_feat, 
+                                                       do_finetune=False)
+
+        gt_feat1, gt_feat2 = gt_feat[:b2], gt_feat[b2:]
+        loss_interp1 = self.loss_fn(interp_feat, gt_feat1, reduction='none')
+        loss_interp2 = self.loss_fn(interp_feat, gt_feat2, reduction='none')
+        # if neighbor_mask[i, pos] = 1, i.e., this pixel's feature is more similar to sub-batch1, 
+        # then use loss weight w. Otherwise, it's more similar to sub-batch2, use loss weight 1-w.
+        neighbor_mask = (loss_interp1 < loss_interp2)
+        loss_weight = neighbor_mask.float() * w + (1 - neighbor_mask).float() * (1 - w)
+        # The more similar features from gt_feat of either sub-batch1 or sub-batch2 are selected 
+        # to compute the loss with interp_feat at each pixel.
+        loss_interp = torch.minimum(loss_interp1, loss_interp2) * loss_weight
+        loss_interp = loss_interp.mean()
+
+        return loss_interp
 
     # inject random noise into x_start. sqrt_one_minus_alphas_cumprod_t is the std of the noise.
     def q_sample(self, x_start, t, noise=None, distill_t_frac=-1, step=0):
@@ -800,7 +852,14 @@ class GaussianDiffusion(nn.Module):
             loss_tea = torch.tensor(0, device=x_start.device)
             loss_align_tea_stu = 0
 
-        loss = loss_stu + loss_tea + self.align_tea_stu_feat_weight * loss_align_tea_stu
+        if self.interp_loss_weight > 0:
+            loss_interp = self.calc_interpolation_loss(x_noisy, t, gt_feat)
+        else:
+            loss_interp = 0
+
+        loss = loss_stu + loss_tea + \
+                self.align_tea_stu_feat_weight * loss_align_tea_stu + \
+                self.interp_loss_weight * loss_interp
 
         # Capping loss at 1 might helps early iterations when losses are unstable (occasionally very large).
         if loss > 1:
@@ -812,10 +871,15 @@ class GaussianDiffusion(nn.Module):
         if not (h == img_size and w == img_size):
             print(f'height and width of image must be {img_size}')
             breakpoint()
-            
-        # t: random numbers of steps between 0 and num_timesteps - 1 (num_timesteps default is 1000)
-        # (b,): different random steps for different images in a batch.
-        t = torch.randint(0, self.num_timesteps, (b, ), device=device).long()
+        
+        if self.interp_loss_weight > 0:
+            assert b % 2 == 0
+            # Two sub-batches use the same random timesteps.
+            t = torch.randint(0, self.num_timesteps, (b//2, ), device=device).long().repeat(2)
+        else:
+            # t: random numbers of steps between 0 and num_timesteps - 1 (num_timesteps default is 1000)
+            # (b,): different random steps for different images in a batch.
+            t = torch.randint(0, self.num_timesteps, (b, ), device=device).long()
 
         img = normalize_to_neg_one_to_one(img)
         return self.p_losses(img, t, *args, **kwargs)

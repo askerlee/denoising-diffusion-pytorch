@@ -177,6 +177,9 @@ parser.add_argument('--tuneteacher', dest='finetune_tea_feat_ext', default=False
 parser.add_argument('--alignfeat', dest='align_tea_stu_feat_weight', default=0.0, type=float, 
                     help='Align the features of the feature extractors of the teacher and the student. '
                     'Default: 0.0, meaning no alignment.')
+parser.add_argument('--winterp', dest='interp_loss_weight', default=0.0, type=float, 
+                    help='Interpolate random image pairs for better latent space semantics structure. '
+                    'Default: 0.0, meaning no interpolation loss.')
 
 args = parser.parse_args()
 print(f"Args:\n{args}")
@@ -208,6 +211,7 @@ diffusion = GaussianDiffusion(
     # use image features extracted with a pretrained model to train the teacher model.
     distillation_type = args.distillation_type,   
     distill_t_frac = args.distill_t_frac,
+    interp_loss_weight = args.interp_loss_weight,
     align_tea_stu_feat_weight = args.align_tea_stu_feat_weight,
     output_dir = args.results_folder,
     debug = args.debug,
