@@ -373,11 +373,14 @@ class Unet(nn.Module):
         )
 
     # extract_pre_feat(): extract features using a pretrained model.
-    # mid_feat is only useful as a reference of the final feature shape and device.
-    def extract_pre_feat(self, feat_extractor, img, mid_feat, do_finetune=False):
+    # ref_feat is only useful as a reference of the final feature shape and device.
+    def extract_pre_feat(self, feat_extractor, img, ref_feat, do_finetune=False):
         if self.distillation_type == 'none':
-            # Just return an empty tensor.
-            return torch.zeros_like(mid_feat[:, []])
+            if ref_feat is None:
+                return None
+            else:
+                # return an empty tensor.
+                return torch.zeros_like(ref_feat[:, []])
 
         if self.distillation_type == 'mini':
             # A miniature image as teacher's priviliged information. 
@@ -391,11 +394,13 @@ class Unet(nn.Module):
                 with torch.no_grad():
                     distill_feat = timm_extract_features(feat_extractor, img)                
 
-        # For 128x128 images, vit features are 4x4. Resize to 16x16.
-        distill_feat = F.interpolate(distill_feat, size=mid_feat.shape[2:], mode='bilinear', align_corners=False)
+        if ref_feat is not None:
+            # For 128x128 images, vit features are 4x4. Resize to 16x16.
+            distill_feat = F.interpolate(distill_feat, size=ref_feat.shape[2:], mode='bilinear', align_corners=False)
+        # Otherwise, do not resize distill_feat.
         return distill_feat
 
-    def forward(self, x, time, img_gt=None):
+    def forward(self, x, time, img_tea=None):
         init_noise = x
         x = self.init_conv(x)
         # t: time embedding.
@@ -430,7 +435,7 @@ class Unet(nn.Module):
 
         # Always fine-tune the student feature extractor.
         noise_feat = self.extract_pre_feat(self.dist_feat_ext_stu, init_noise, mid_feat, 
-                                               do_finetune=True)
+                                           do_finetune=True)
         for ind, (block1, block2, attn, upsample) in enumerate(self.ups):
             if ind == 0:
                 x = torch.cat((x, h[-ind-1], noise_feat), dim=1)
@@ -445,18 +450,18 @@ class Unet(nn.Module):
             x = upsample(x)
 
         pred_stu = self.final_conv(x)
-        gt_feat  = None
+        tea_feat  = None
 
-        # img_gt is provided. Do distillation.
-        if img_gt is not None:
+        # img_tea is provided. Do distillation.
+        if img_tea is not None:
             x = mid_feat
             # finetune_tea_feat_ext controls whether to fine-tune the teacher feature extractor.
-            gt_feat = self.extract_pre_feat(self.dist_feat_ext_tea, img_gt, mid_feat, 
-                                                do_finetune=self.finetune_tea_feat_ext)
+            tea_feat = self.extract_pre_feat(self.dist_feat_ext_tea, img_tea, mid_feat, 
+                                             do_finetune=self.finetune_tea_feat_ext)
 
             for ind, (block1, block2, attn, upsample) in enumerate(self.ups_tea):
                 if ind == 0:
-                    x = torch.cat((x, h[-ind-1], gt_feat), dim=1)
+                    x = torch.cat((x, h[-ind-1], tea_feat), dim=1)
                 else:
                     x = torch.cat((x, h[-ind-1]), dim=1)
 
@@ -472,7 +477,7 @@ class Unet(nn.Module):
         else:
             pred_tea = None
 
-        return { 'pred_stu': pred_stu, 'pred_tea': pred_tea, 'noise_feat': noise_feat, 'gt_feat': gt_feat }
+        return { 'pred_stu': pred_stu, 'pred_tea': pred_tea, 'noise_feat': noise_feat, 'tea_feat': tea_feat }
 
 # gaussian diffusion trainer class
 # suppose t is a 1-d tensor of indices.
@@ -690,21 +695,23 @@ class GaussianDiffusion(nn.Module):
         return img
 
     # x is already added with noises.
-    def calc_interpolation_loss(self, noisy_img, t, gt_feat, min_interp_w = 0.2):
-        b = noisy_img.shape[0]
+    def calc_interpolation_loss(self, img_noisy, img_gt, t, min_interp_w = 0.2):
+        b = img_noisy.shape[0]
         assert b % 2 == 0
         b2 = b // 2
-        x1, x2 = noisy_img[:b2], noisy_img[b2:]
+        x1, x2 = img_noisy[:b2], img_noisy[b2:]
         t2 = t[:b2]
-        gt_feat1, gt_feat2 = gt_feat[:b2], gt_feat[b2:]
+        feat_gt = self.denoise_fn.extract_pre_feat(self.denoise_fn.dist_feat_ext_tea, img_gt, None, 
+                                                   do_finetune=False)        
+        feat_gt1, feat_gt2 = feat_gt[:b2], feat_gt[b2:]
 
-        w = torch.rand((b2, ), device=noisy_img.device)
+        w = torch.rand((b2, ), device=img_noisy.device)
         # Normalize w into [min_interp_w, 1-min_interp_w], i.e., [0.2, 0.8].
         w = (1 - 2 * min_interp_w) * w + min_interp_w
-        w = w.view(b2, *((1,) * (len(noisy_img.shape) - 1)))
+        w = w.view(b2, *((1,) * (len(img_noisy.shape) - 1)))
         interp_img = w * x1 + (1 - w) * x2 
 
-        # Setting the last param (img_gt) to None, so that teacher module won't be executed, 
+        # Setting the last param (img_tea) to None, so that teacher module won't be executed, 
         # to reduce unnecessary compute.
         model_output_dict = self.denoise_fn(interp_img, t2, None)
         interp_pred = model_output_dict['pred_stu']
@@ -714,17 +721,17 @@ class GaussianDiffusion(nn.Module):
             interp_pred = self.predict_start_from_noise(interp_img, t2, interp_pred)
         # otherwise, objective is 'pred_x0', and interp_pred is already the predicted image.
             
-        interp_feat = self.denoise_fn.extract_pre_feat(self.denoise_fn.dist_feat_ext_tea, interp_pred, gt_feat1, 
+        feat_interp = self.denoise_fn.extract_pre_feat(self.denoise_fn.dist_feat_ext_tea, interp_pred, None, 
                                                        do_finetune=False)
 
-        loss_interp1 = self.loss_fn(interp_feat, gt_feat1, reduction='none')
-        loss_interp2 = self.loss_fn(interp_feat, gt_feat2, reduction='none')
+        loss_interp1 = self.loss_fn(feat_interp, feat_gt1, reduction='none')
+        loss_interp2 = self.loss_fn(feat_interp, feat_gt2, reduction='none')
         # if neighbor_mask[i, pos] = 1, i.e., this pixel's feature is more similar to sub-batch1, 
         # then use loss weight w. Otherwise, it's more similar to sub-batch2, use loss weight 1-w.
         neighbor_mask = (loss_interp1 < loss_interp2).float()
         loss_weight = neighbor_mask * w + (1 - neighbor_mask) * (1 - w)
-        # The more similar features from gt_feat of either sub-batch1 or sub-batch2 are selected 
-        # to compute the loss with interp_feat at each pixel.
+        # The more similar features from tea_feat of either sub-batch1 or sub-batch2 are selected 
+        # to compute the loss with feat_interp at each pixel.
         loss_interp = torch.minimum(loss_interp1, loss_interp2) * loss_weight
         loss_interp = loss_interp.mean()
 
@@ -802,31 +809,19 @@ class GaussianDiffusion(nn.Module):
         x_noisy = self.q_sample(x_start=x_start, t=t, noise=noise, distill_t_frac=self.distill_t_frac, step=step)
         # Sample an easier x2 according to a smaller t.
         if self.distill_t_frac == -1:
-            x   = x_noisy
-            x2  = None
+            x       = x_noisy
+            x_tea   = None
         else:
-            x, x2 = x_noisy
+            x, x_tea = x_noisy
 
         if self.debug and step < 10:
             utils.save_image(x, f'{self.output_dir}/{step}-stu.png')
-            if x2 is not None:
-                utils.save_image(x2, f'{self.output_dir}/{step}-tea.png')
+            if x_tea is not None:
+                utils.save_image(x_tea, f'{self.output_dir}/{step}-tea.png')
 
-        if self.distillation_type != 'none':
-            if self.objective == 'pred_noise':
-                # Using noise performs worse.
-                img_gt = x_start                
-            elif self.objective == 'pred_x0':
-                # Maybe better use noise here? Maybe if img_gt is different from the objective, 
-                # it helps train the teacher?
-                img_gt = x_start                
-            else:
-                breakpoint()
-        else:
-            img_gt = None
-        model_output_dict = self.denoise_fn(x, t, x2)
-        pred_stu, pred_tea  = model_output_dict['pred_stu'], model_output_dict['pred_tea']
-        noise_feat, gt_feat = model_output_dict['noise_feat'], model_output_dict['gt_feat']
+        model_output_dict    = self.denoise_fn(x, t, x_tea)
+        pred_stu, pred_tea   = model_output_dict['pred_stu'],   model_output_dict['pred_tea']
+        noise_feat, tea_feat = model_output_dict['noise_feat'], model_output_dict['tea_feat']
 
         if self.objective == 'pred_noise':
             # Laplacian loss doesn't help. Instead, it makes convergence very slow.
@@ -847,7 +842,7 @@ class GaussianDiffusion(nn.Module):
         if self.distillation_type != 'none':
             loss_tea    = self.loss_fn(pred_tea, target)
             if self.distillation_type != 'mini':
-                loss_align_tea_stu = F.l1_loss(noise_feat, gt_feat.detach())
+                loss_align_tea_stu = F.l1_loss(noise_feat, tea_feat.detach())
             else:
                 loss_align_tea_stu = 0
         else:
@@ -855,7 +850,7 @@ class GaussianDiffusion(nn.Module):
             loss_align_tea_stu = 0
 
         if self.interp_loss_weight > 0:
-            loss_interp = self.calc_interpolation_loss(x, t, gt_feat)
+            loss_interp = self.calc_interpolation_loss(x, x_start, t)
         else:
             loss_interp = 0
 
