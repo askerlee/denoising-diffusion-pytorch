@@ -103,7 +103,7 @@ class Trainer(object):
                         loss = loss_dict['loss'].mean()
                         self.scaler.scale(loss / self.gradient_accumulate_every).backward()
 
-                    if args.distillation_type != 'none':
+                    if args.do_distillation:
                         loss_stu = loss_dict['loss_stu'].mean()
                         loss_tea = loss_dict['loss_tea'].mean()
                         self.loss_meter.update('loss_stu', loss_stu.item())
@@ -197,8 +197,8 @@ unet = Unet(
     dim_mults = (1, 2, 4, 8),
     # with_time_emb = True, do time embedding.
     memory_size = args.memory_size,
-    # if distillation_type=='mini', use a miniature of original images as privileged information to train the teacher model.
-    # if distillation_type=='resnet34' or another model name, 
+    # if do_distillation and featnet_type=='mini', use a miniature of original images as privileged information to train the teacher model.
+    # if do_distillation and featnet_type=='resnet34' or another model name, 
     # use image features extracted with a pretrained model to train the teacher model.
     featnet_type = args.featnet_type,
     do_distillation = args.do_distillation,
