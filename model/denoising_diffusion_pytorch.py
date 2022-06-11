@@ -853,7 +853,7 @@ class GaussianDiffusion(nn.Module):
             loss_align_tea_stu = 0
 
         if self.interp_loss_weight > 0:
-            loss_interp = self.calc_interpolation_loss(x_noisy, t, gt_feat)
+            loss_interp = self.calc_interpolation_loss(x, t, gt_feat)
         else:
             loss_interp = 0
 
