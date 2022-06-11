@@ -721,8 +721,8 @@ class GaussianDiffusion(nn.Module):
         loss_interp2 = self.loss_fn(interp_feat, gt_feat2, reduction='none')
         # if neighbor_mask[i, pos] = 1, i.e., this pixel's feature is more similar to sub-batch1, 
         # then use loss weight w. Otherwise, it's more similar to sub-batch2, use loss weight 1-w.
-        neighbor_mask = (loss_interp1 < loss_interp2)
-        loss_weight = neighbor_mask.float() * w + (1 - neighbor_mask).float() * (1 - w)
+        neighbor_mask = (loss_interp1 < loss_interp2).float()
+        loss_weight = neighbor_mask * w + (1 - neighbor_mask) * (1 - w)
         # The more similar features from gt_feat of either sub-batch1 or sub-batch2 are selected 
         # to compute the loss with interp_feat at each pixel.
         loss_interp = torch.minimum(loss_interp1, loss_interp2) * loss_weight
