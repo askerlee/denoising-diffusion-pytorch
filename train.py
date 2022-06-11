@@ -104,10 +104,10 @@ class Trainer(object):
                         self.scaler.scale(loss / self.gradient_accumulate_every).backward()
 
                     loss_stu = loss_dict['loss_stu'].mean()
-                    avg_loss_stu = self.loss_meter.avg['disp']['loss_stu']
                     self.loss_meter.update('loss_stu', loss_stu.item())
+                    avg_loss_stu = self.loss_meter.avg['disp']['loss_stu']
                     desc_items = [ f's {loss_stu.item():.3f}/{avg_loss_stu:.3f}' ]
-                    
+
                     if args.do_distillation:
                         loss_tea = loss_dict['loss_tea'].mean()
                         self.loss_meter.update('loss_tea', loss_tea.item())
