@@ -164,12 +164,12 @@ parser.add_argument('--obj', dest='objective_type', type=str, choices=['pred_noi
                     help="Type of denoising objective")
 parser.add_argument('--sampinterval', dest='save_sample_interval', type=int, default=1000, 
                     help="Every N iterations, save model and sample example images")
-parser.add_argument('--distill', dest='distillation_type', 
+parser.add_argument('--featnet', dest='featnet_type', 
                     choices=[ 'none', 'mini', 'resnet34', 'resnet18', 'repvgg_b0', 
                               'mobilenetv2_120d', 'vit_base_patch8_224', 'vit_tiny_patch16_224' ], 
                     default='vit_tiny_patch16_224', 
-                    help='Do distillation: use a miniature or features of original images to train a teacher model, '
-                         'which makes the model converge faster.')
+                    help='Type of the feature network. Used by the distillation and interpolation losses.')
+parser.add_argument('--distill', dest='do_distillation', action='store_true', help='Do distillation')                    
 parser.add_argument('--dtfrac', dest='distill_t_frac', default=0.0, type=float, 
                     help='Fraction of t of noise to be added to teacher images (default: 0, groundtruth images)')   
 parser.add_argument('--tuneteacher', dest='finetune_tea_feat_ext', default=False, action='store_true', 
@@ -185,6 +185,13 @@ args = parser.parse_args()
 print(f"Args:\n{args}")
 torch.set_printoptions(sci_mode=False)
 
+if args.do_distillation and args.featnet_type == 'none':
+    print("Distillation is enabled, but no feature network is specified. ")
+    exit(0)
+if args.interp_loss_weight > 0 and args.featnet_type == 'none':
+    print("Interpolation loss is enabled, but no feature network is specified. ")
+    exit(0)
+
 unet = Unet(
     dim = 64,
     dim_mults = (1, 2, 4, 8),
@@ -193,7 +200,8 @@ unet = Unet(
     # if distillation_type=='mini', use a miniature of original images as privileged information to train the teacher model.
     # if distillation_type=='resnet34' or another model name, 
     # use image features extracted with a pretrained model to train the teacher model.
-    distillation_type = args.distillation_type,
+    featnet_type = args.featnet_type,
+    do_distillation = args.do_distillation,
     # if finetune_tea_feat_ext=False,
     # do not finetune the pretrained image feature extractor of the teacher model.
     finetune_tea_feat_ext = args.finetune_tea_feat_ext
@@ -206,10 +214,11 @@ diffusion = GaussianDiffusion(
     alpha_beta_schedule = args.alpha_beta_schedule, # alpha/beta schedule
     loss_type = args.loss_type,         # L1, L2, lap (Laplacian)
     objective = args.objective_type,    # objective type, pred_noise or pred_x0
-    # if distillation_type=='mini', use a miniature of original images as privileged information to train the teacher model.
-    # if distillation_type=='resnet34' or another model name, 
+    # if do_distillation and featnet_type=='mini', use a miniature of original images as privileged information to train the teacher model.
+    # if do_distillation and featnet_type=='resnet34' or another model name, 
     # use image features extracted with a pretrained model to train the teacher model.
-    distillation_type = args.distillation_type,   
+    featnet_type = args.featnet_type,
+    do_distillation = args.do_distillation,
     distill_t_frac = args.distill_t_frac,
     interp_loss_weight = args.interp_loss_weight,
     align_tea_stu_feat_weight = args.align_tea_stu_feat_weight,

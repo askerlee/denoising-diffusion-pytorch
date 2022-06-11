@@ -246,8 +246,9 @@ class Unet(nn.Module):
         resnet_block_groups = 8,
         memory_size = 1024,
         learned_variance = False,
-        distillation_type = 'none',
+        featnet_type = 'none',
         finetune_tea_feat_ext = False,
+        do_distillation = False,
     ):
         super().__init__()
 
@@ -313,28 +314,32 @@ class Unet(nn.Module):
         # Seems setting kernel size to 1 leads to slightly worse images?
         self.mid_block2 = block_klass(mid_dim, mid_dim, kernel_size=1, time_emb_dim = time_dim)
 
-        self.distillation_type      = distillation_type
+        self.featnet_type      = featnet_type
         self.finetune_tea_feat_ext  = finetune_tea_feat_ext
-        
-        if self.distillation_type != 'none' and self.distillation_type != 'mini':
+        self.do_distillation   = do_distillation
+
+        if self.featnet_type != 'none' and self.featnet_type != 'mini':
             # Tried 'efficientnet_b0', but it doesn't perform well.
             # 'resnet34', 'resnet18', 'repvgg_b0'
-            self.distill_feat_extractor_type = self.distillation_type 
-            self.distill_feat_dim   = timm_model2dim[self.distill_feat_extractor_type]
-            self.dist_feat_ext_tea  = timm.create_model(self.distill_feat_extractor_type, pretrained=True)
-            self.dist_feat_ext_stu  = timm.create_model(self.distill_feat_extractor_type, pretrained=True)
+            self.featnet_type   = self.featnet_type 
+            self.featnet_dim    = timm_model2dim[self.featnet_type]
+            self.dist_feat_ext_tea  = timm.create_model(self.featnet_type, pretrained=True)
+            if self.do_distillation:
+                self.dist_feat_ext_stu  = timm.create_model(self.featnet_type, pretrained=True)
+            else:
+                self.dist_feat_ext_stu  = None
         else:
-            self.distill_feat_dim  = 0
+            self.featnet_dim  = 0
             self.dist_feat_ext_tea = None
             self.dist_feat_ext_stu = None
 
-        if self.distillation_type == 'none':
+        if (not self.do_distillation) or self.featnet_type == 'none':
             extra_up_dim = 0
-        elif self.distillation_type == 'mini':
+        elif self.featnet_type == 'mini':
             extra_up_dim = 3
         else:
             # number of output features from the image feature extractor.
-            extra_up_dim = self.distill_feat_dim
+            extra_up_dim = self.featnet_dim
 
         extra_up_dims = [ extra_up_dim ] + [0] * (num_resolutions - 1)
                         
@@ -373,16 +378,11 @@ class Unet(nn.Module):
         )
 
     # extract_pre_feat(): extract features using a pretrained model.
-    # ref_feat is only useful as a reference of the final feature shape and device.
-    def extract_pre_feat(self, feat_extractor, img, ref_feat, do_finetune=False):
-        if self.distillation_type == 'none':
-            if ref_feat is None:
-                return None
-            else:
-                # return an empty tensor.
-                return torch.zeros_like(ref_feat[:, []])
+    def extract_pre_feat(self, feat_extractor, img, ref_shape, do_finetune=False):
+        if self.featnet_type == 'none':
+            return None
 
-        if self.distillation_type == 'mini':
+        if self.featnet_type == 'mini':
             # A miniature image as teacher's priviliged information. 
             # 128x128 images will be resized to 16x16 below.
             distill_feat = img
@@ -394,9 +394,9 @@ class Unet(nn.Module):
                 with torch.no_grad():
                     distill_feat = timm_extract_features(feat_extractor, img)                
 
-        if ref_feat is not None:
+        if ref_shape is not None:
             # For 128x128 images, vit features are 4x4. Resize to 16x16.
-            distill_feat = F.interpolate(distill_feat, size=ref_feat.shape[2:], mode='bilinear', align_corners=False)
+            distill_feat = F.interpolate(distill_feat, size=ref_shape, mode='bilinear', align_corners=False)
         # Otherwise, do not resize distill_feat.
         return distill_feat
 
@@ -434,7 +434,7 @@ class Unet(nn.Module):
         mid_feat = x
 
         # Always fine-tune the student feature extractor.
-        noise_feat = self.extract_pre_feat(self.dist_feat_ext_stu, init_noise, mid_feat, 
+        noise_feat = self.extract_pre_feat(self.dist_feat_ext_stu, init_noise, mid_feat.shape, 
                                            do_finetune=True)
         for ind, (block1, block2, attn, upsample) in enumerate(self.ups):
             if ind == 0:
@@ -453,10 +453,10 @@ class Unet(nn.Module):
         tea_feat  = None
 
         # img_tea is provided. Do distillation.
-        if img_tea is not None:
+        if self.do_distillation and img_tea is not None:
             x = mid_feat
             # finetune_tea_feat_ext controls whether to fine-tune the teacher feature extractor.
-            tea_feat = self.extract_pre_feat(self.dist_feat_ext_tea, img_tea, mid_feat, 
+            tea_feat = self.extract_pre_feat(self.dist_feat_ext_tea, img_tea, mid_feat.shape, 
                                              do_finetune=self.finetune_tea_feat_ext)
 
             for ind, (block1, block2, attn, upsample) in enumerate(self.ups_tea):
@@ -527,7 +527,8 @@ class GaussianDiffusion(nn.Module):
         alpha_beta_schedule = 'linb',
         loss_type = 'l1',
         objective = 'pred_noise',
-        distillation_type = 'none',
+        featnet_type = 'none',
+        do_distillation = False,
         distill_t_frac = 0.,
         interp_loss_weight = 0.,
         align_tea_stu_feat_weight = 0,
@@ -548,8 +549,9 @@ class GaussianDiffusion(nn.Module):
         self.image_size = image_size
         self.denoise_fn = denoise_fn    # Unet
         self.objective = objective
-        self.distillation_type = distillation_type
-        self.distill_t_frac = distill_t_frac if self.distillation_type != 'none' else -1
+        self.featnet_type = featnet_type
+        self.do_distillation = do_distillation
+        self.distill_t_frac = distill_t_frac if self.do_distillation  else -1
         self.interp_loss_weight = interp_loss_weight
         self.align_tea_stu_feat_weight = align_tea_stu_feat_weight
         self.output_dir = output_dir
@@ -839,9 +841,9 @@ class GaussianDiffusion(nn.Module):
             raise ValueError(f'unknown objective {self.objective}')
 
         loss_stu = self.loss_fn(pred_stu, target)
-        if self.distillation_type != 'none':
+        if self.do_distillation:
             loss_tea    = self.loss_fn(pred_tea, target)
-            if self.distillation_type != 'mini':
+            if self.featnet_type != 'mini':
                 loss_align_tea_stu = F.l1_loss(noise_feat, tea_feat.detach())
             else:
                 loss_align_tea_stu = 0
