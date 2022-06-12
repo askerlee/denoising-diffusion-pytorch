@@ -749,7 +749,7 @@ class GaussianDiffusion(nn.Module):
         return loss_interp
 
     # inject random noise into x_start. sqrt_one_minus_alphas_cumprod_t is the std of the noise.
-    def q_sample(self, x_start, t, noise=None, distill_t_frac=-1, step=0):
+    def q_sample(self, x_start, t, noise=None, distill_t_frac=-1, step=-1):
         assert distill_t_frac <= 1
 
         noise = default(noise, lambda: torch.randn_like(x_start))
@@ -761,7 +761,7 @@ class GaussianDiffusion(nn.Module):
         noise_weight    = torch.sqrt(1 - alphas_cumprod)
         x_noisy1 = x_start_weight * x_start + noise_weight * noise
 
-        if self.debug and step < 10:
+        if self.debug and step >=0 and step < 10:
             print(f'{step} x_start_weight\n{x_start_weight.flatten()}')
             print(f'{step} noise_weight\n{noise_weight.flatten()}')
 
@@ -781,7 +781,7 @@ class GaussianDiffusion(nn.Module):
                 noise_weight2   = torch.sqrt(1 - alphas_cumprod2)
                 x_noisy2 = x_start_weight2 * x_start + noise_weight2 * noise
 
-                if self.debug and step < 10:
+                if self.debug and step >=0 and step < 10:
                     print(f'{step} x_start_weight2\n{x_start_weight2.flatten()}')
                     print(f'{step} noise_weight2\n{noise_weight2.flatten()}')
 
