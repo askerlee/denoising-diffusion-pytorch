@@ -323,10 +323,13 @@ class Unet(nn.Module):
             # 'resnet34', 'resnet18', 'repvgg_b0'
             self.featnet_type   = self.featnet_type 
             self.featnet_dim    = timm_model2dim[self.featnet_type]
-            self.dist_feat_ext_tea  = timm.create_model(self.featnet_type, pretrained=True)
+            self.interp_feat_ext    = timm.create_model(self.featnet_type, pretrained=True)
+
             if self.do_distillation:
+                self.dist_feat_ext_tea  = timm.create_model(self.featnet_type, pretrained=True)
                 self.dist_feat_ext_stu  = timm.create_model(self.featnet_type, pretrained=True)
             else:
+                self.dist_feat_ext_tea  = None
                 self.dist_feat_ext_stu  = None
         else:
             self.featnet_dim  = 0
@@ -378,7 +381,7 @@ class Unet(nn.Module):
         )
 
     # extract_pre_feat(): extract features using a pretrained model.
-    def extract_pre_feat(self, feat_extractor, img, ref_shape, do_finetune=False):
+    def extract_pre_feat(self, feat_extractor, img, ref_shape, has_grad=True):
         if self.featnet_type == 'none':
             return None
 
@@ -387,7 +390,7 @@ class Unet(nn.Module):
             # 128x128 images will be resized to 16x16 below.
             distill_feat = img
         else:
-            if do_finetune:
+            if has_grad:
                 distill_feat = timm_extract_features(feat_extractor, img)
             else:
                 # Wrap the feature extraction with no_grad() to save RAM.
@@ -437,7 +440,7 @@ class Unet(nn.Module):
         # Always fine-tune the student feature extractor.
             noise_feat = self.extract_pre_feat(self.dist_feat_ext_stu, init_noise, 
                                                mid_feat.shape[2:], 
-                                               do_finetune=True)
+                                               has_grad=True)
         else:
             noise_feat = None
 
@@ -463,7 +466,7 @@ class Unet(nn.Module):
             # finetune_tea_feat_ext controls whether to fine-tune the teacher feature extractor.
             tea_feat = self.extract_pre_feat(self.dist_feat_ext_tea, img_tea, 
                                              mid_feat.shape[2:], 
-                                             do_finetune=self.finetune_tea_feat_ext)
+                                             has_grad=self.finetune_tea_feat_ext)
 
             for ind, (block1, block2, attn, upsample) in enumerate(self.ups_tea):
                 if ind == 0:
@@ -709,8 +712,8 @@ class GaussianDiffusion(nn.Module):
         b2 = b // 2
         x1, x2 = img_noisy[:b2], img_noisy[b2:]
         t2 = t[:b2]
-        feat_gt = self.denoise_fn.extract_pre_feat(self.denoise_fn.dist_feat_ext_tea, img_gt, None, 
-                                                   do_finetune=False)        
+        feat_gt = self.denoise_fn.extract_pre_feat(self.denoise_fn.interp_feat_ext, img_gt, None, 
+                                                   has_grad=True)        
         feat_gt1, feat_gt2 = feat_gt[:b2], feat_gt[b2:]
 
         w = torch.rand((b2, ), device=img_noisy.device)
@@ -729,8 +732,8 @@ class GaussianDiffusion(nn.Module):
             interp_pred = self.predict_start_from_noise(interp_img, t2, interp_pred)
         # otherwise, objective is 'pred_x0', and interp_pred is already the predicted image.
             
-        feat_interp = self.denoise_fn.extract_pre_feat(self.denoise_fn.dist_feat_ext_tea, interp_pred, None, 
-                                                       do_finetune=False)
+        feat_interp = self.denoise_fn.extract_pre_feat(self.denoise_fn.interp_feat_ext, interp_pred, None, 
+                                                       has_grad=True)
 
         loss_interp1 = self.loss_fn(feat_interp, feat_gt1, reduction='none')
         loss_interp2 = self.loss_fn(feat_interp, feat_gt2, reduction='none')

@@ -92,6 +92,9 @@ class Trainer(object):
         with tqdm(initial = self.step, total = self.train_num_steps) as pbar:
 
             while self.step < self.train_num_steps:
+                # Back up the weight of interp_feat_ext.
+                interp_feat_ext = copy.deepcopy(self.model.denoise_fn.interp_feat_ext)
+
                 for i in range(self.gradient_accumulate_every):
                     data = next(self.dl).cuda()
 
@@ -125,6 +128,8 @@ class Trainer(object):
                 self.scaler.step(self.opt)
                 self.scaler.update()
                 self.opt.zero_grad()
+                # Restore interp_feat_ext weights to keep it from being updated.
+                self.model.denoise_fn.interp_feat_ext = interp_feat_ext
 
                 if self.step % self.update_ema_every == 0:
                     self.step_ema()
