@@ -130,9 +130,13 @@ def sample_images(model, num_images, batch_size, img_save_path):
 
 # For CNN models, just forward to forward_features().
 # For ViTs, patch the original timm code to keep the spatial dimensions of the extracted image features.
-def timm_extract_features(model, x, use_vit_cls=False):
+# use_cls_feat: collapse geometric dimensions of the features.
+def timm_extract_features(model, x, use_cls_feat=False):
     if type(model) != timm.models.vision_transformer.VisionTransformer:
-        return model.forward_features(x)
+        if use_cls_feat:
+            feat = model.forward_features(x)
+            feat = feat.mean(dim=3, keepdim=True).mean(dim=2, keepdim=True)
+        return feat
 
     # img_size and patch_size are tuples.
     img_size = model.patch_embed.img_size
@@ -150,7 +154,7 @@ def timm_extract_features(model, x, use_vit_cls=False):
     x = model.blocks(x)
     x = model.norm(x)
 
-    if use_vit_cls:
+    if use_cls_feat:
         x = x[:, [0]].permute(0, 2, 1).reshape(x.shape[0], -1, 1, 1)
     else:
         # Remove the 'CLS' token from the output.

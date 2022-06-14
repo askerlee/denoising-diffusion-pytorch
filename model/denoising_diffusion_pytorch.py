@@ -381,7 +381,7 @@ class Unet(nn.Module):
         )
 
     # extract_pre_feat(): extract features using a pretrained model.
-    def extract_pre_feat(self, feat_extractor, img, ref_shape, has_grad=True, use_vit_cls=False):
+    def extract_pre_feat(self, feat_extractor, img, ref_shape, has_grad=True, use_cls_feat=False):
         if self.featnet_type == 'none':
             return None
 
@@ -391,11 +391,11 @@ class Unet(nn.Module):
             distill_feat = img
         else:
             if has_grad:
-                distill_feat = timm_extract_features(feat_extractor, img, use_vit_cls)
+                distill_feat = timm_extract_features(feat_extractor, img, use_cls_feat)
             else:
                 # Wrap the feature extraction with no_grad() to save RAM.
                 with torch.no_grad():
-                    distill_feat = timm_extract_features(feat_extractor, img, use_vit_cls)                
+                    distill_feat = timm_extract_features(feat_extractor, img, use_cls_feat)                
 
         if ref_shape is not None:
             # For 128x128 images, vit features are 4x4. Resize to 16x16.
@@ -540,6 +540,7 @@ class GaussianDiffusion(nn.Module):
         do_distillation = False,
         distill_t_frac = 0.,
         interp_loss_weight = 0.,
+        interp_use_cls_feat = True,
         align_tea_stu_feat_weight = 0,
         output_dir = './results',
         debug = False,
@@ -555,17 +556,18 @@ class GaussianDiffusion(nn.Module):
         assert not (type(self) == GaussianDiffusion and denoise_fn_channels != denoise_fn_out_dim)
 
         self.channels = channels
-        self.image_size = image_size
-        self.denoise_fn = denoise_fn    # Unet
-        self.objective = objective
-        self.featnet_type = featnet_type
-        self.do_distillation = do_distillation
-        self.distill_t_frac = distill_t_frac if self.do_distillation  else -1
-        self.interp_loss_weight = interp_loss_weight
+        self.image_size         = image_size
+        self.denoise_fn         = denoise_fn    # Unet
+        self.objective          = objective
+        self.featnet_type       = featnet_type
+        self.do_distillation    = do_distillation
+        self.distill_t_frac     = distill_t_frac if self.do_distillation  else -1
+        self.interp_loss_weight     = interp_loss_weight
+        self.interp_use_cls_feat    = interp_use_cls_feat
         self.align_tea_stu_feat_weight = align_tea_stu_feat_weight
         self.output_dir = output_dir
         self.debug = debug
-        self.num_timesteps = num_timesteps
+        self.num_timesteps      = num_timesteps
         self.alpha_beta_schedule = alpha_beta_schedule
         
         if self.alpha_beta_schedule == 'cosb':
@@ -706,16 +708,14 @@ class GaussianDiffusion(nn.Module):
         return img
 
     # x is already added with noises.
-    def calc_interpolation_loss(self, img_noisy, img_gt, t, min_interp_w = 0.2):
+    def calc_interpolation_loss(self, img_noisy, img_gt, t, min_interp_w = 0.3):
         b = img_noisy.shape[0]
         assert b % 2 == 0
         b2 = b // 2
         x1, x2 = img_noisy[:b2], img_noisy[b2:]
         t2 = t[:b2]
-        # Collapse geometric dimensions of the features when computing the interpolation loss.
-        use_vit_cls = self.featnet_type.startswith('vit')
         feat_gt = self.denoise_fn.extract_pre_feat(self.denoise_fn.interp_feat_ext, img_gt, None, 
-                                                   has_grad=True, use_vit_cls=use_vit_cls)        
+                                                   has_grad=True, use_cls_feat=self.interp_use_cls_feat)        
         feat_gt1, feat_gt2 = feat_gt[:b2], feat_gt[b2:]
 
         w = torch.rand((b2, ), device=img_noisy.device)
@@ -735,7 +735,7 @@ class GaussianDiffusion(nn.Module):
         # otherwise, objective is 'pred_x0', and interp_pred is already the predicted image.
             
         feat_interp = self.denoise_fn.extract_pre_feat(self.denoise_fn.interp_feat_ext, interp_pred, None, 
-                                                       has_grad=True, use_vit_cls=use_vit_cls)
+                                                       has_grad=True, use_cls_feat=self.interp_use_cls_feat)
 
         loss_interp1 = self.loss_fn(feat_interp, feat_gt1, reduction='none')
         loss_interp2 = self.loss_fn(feat_interp, feat_gt2, reduction='none')

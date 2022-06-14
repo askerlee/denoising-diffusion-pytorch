@@ -191,6 +191,8 @@ parser.add_argument('--alignfeat', dest='align_tea_stu_feat_weight', default=0.0
 parser.add_argument('--winterp', dest='interp_loss_weight', default=0.0, type=float, 
                     help='Interpolate random image pairs for better latent space semantics structure. '
                     'Default: 0.0, meaning no interpolation loss.')
+parser.add_argument('--interpfullfeat', dest='interp_use_cls_feat', action='store_false', 
+                    help='Do not use CLS feat, instead use the full featmaps when computing interpolation loss')                    
 
 args = parser.parse_args()
 print(f"Args:\n{args}")
@@ -232,6 +234,7 @@ diffusion = GaussianDiffusion(
     do_distillation = args.do_distillation,
     distill_t_frac = args.distill_t_frac,
     interp_loss_weight = args.interp_loss_weight,
+    interp_use_cls_feat = args.interp_use_cls_feat,
     align_tea_stu_feat_weight = args.align_tea_stu_feat_weight,
     output_dir = args.results_folder,
     debug = args.debug,
