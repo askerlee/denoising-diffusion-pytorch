@@ -133,8 +133,8 @@ def sample_images(model, num_images, batch_size, img_save_path):
 # use_cls_feat: collapse geometric dimensions of the features.
 def timm_extract_features(model, x, use_cls_feat=False):
     if type(model) != timm.models.vision_transformer.VisionTransformer:
+        feat = model.forward_features(x)
         if use_cls_feat:
-            feat = model.forward_features(x)
             feat = feat.mean(dim=3, keepdim=True).mean(dim=2, keepdim=True)
         return feat
 
