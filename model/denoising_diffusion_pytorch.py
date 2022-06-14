@@ -712,6 +712,7 @@ class GaussianDiffusion(nn.Module):
         b2 = b // 2
         x1, x2 = img_noisy[:b2], img_noisy[b2:]
         t2 = t[:b2]
+        # Collapse geometric dimensions of the features when computing the interpolation loss.
         use_vit_cls = self.featnet_type.startswith('vit')
         feat_gt = self.denoise_fn.extract_pre_feat(self.denoise_fn.interp_feat_ext, img_gt, None, 
                                                    has_grad=True, use_vit_cls=use_vit_cls)        
