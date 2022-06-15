@@ -857,15 +857,15 @@ class GaussianDiffusion(nn.Module):
             if self.featnet_type != 'mini':
                 loss_align_tea_stu = F.l1_loss(noise_feat, tea_feat.detach())
             else:
-                loss_align_tea_stu = 0
+                loss_align_tea_stu = torch.zeros_like(loss_stu)
         else:
             loss_tea = torch.tensor(0, device=x_start.device)
-            loss_align_tea_stu = 0
+            loss_align_tea_stu = torch.zeros_like(loss_stu)
 
         if self.interp_loss_weight > 0:
             loss_interp = self.calc_interpolation_loss(x, x_start, t)
         else:
-            loss_interp = 0
+            loss_interp = torch.zeros_like(loss_stu)
 
         loss = loss_stu + loss_tea + \
                 self.align_tea_stu_feat_weight * loss_align_tea_stu + \

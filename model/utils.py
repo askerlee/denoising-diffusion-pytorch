@@ -30,6 +30,7 @@ class Dataset(data.Dataset):
         self.folder = folder
         self.image_size = image_size
         self.paths = [p for ext in exts for p in Path(f'{folder}').glob(f'**/*.{ext}')]
+        print("Found {} images in {}".format(len(self.paths), folder))
 
         '''
         self.transform = transforms.Compose([
