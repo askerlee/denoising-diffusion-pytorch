@@ -48,7 +48,7 @@ class Trainer(object):
 
         self.ds = Dataset(folder, image_size)
         self.dl = cycle(data.DataLoader(self.ds, batch_size = train_batch_size, shuffle=True, 
-                                        pin_memory=True, num_workers=num_workers))
+                                        pin_memory=True, drop_last=True, num_workers=num_workers))
         self.opt = Adam(diffusion_model.parameters(), lr=train_lr, weight_decay=weight_decay)
 
         self.step = 0
@@ -178,7 +178,7 @@ parser.add_argument('--sampinterval', dest='save_sample_interval', type=int, def
 parser.add_argument('--featnet', dest='featnet_type', 
                     choices=[ 'none', 'mini', 'resnet34', 'resnet18', 'repvgg_b0', 
                               'mobilenetv2_120d', 'vit_base_patch8_224', 'vit_tiny_patch16_224' ], 
-                    default='repvgg_b0', 
+                    default='vit_tiny_patch16_224', 
                     help='Type of the feature network. Used by the distillation and interpolation losses.')
 parser.add_argument('--distill', dest='do_distillation', action='store_true', help='Do distillation')                    
 parser.add_argument('--dtfrac', dest='distill_t_frac', default=0.8, type=float, 
@@ -201,8 +201,11 @@ torch.set_printoptions(sci_mode=False)
 if args.do_distillation and args.featnet_type == 'none':
     print("Distillation is enabled, but no feature network is specified. ")
     exit(0)
-if args.interp_loss_weight > 0 and args.featnet_type == 'none':
-    print("Interpolation loss is enabled, but no feature network is specified. ")
+if args.interp_loss_weight > 0:
+    if args.featnet_type == 'none':
+        print("Interpolation loss is enabled, but no feature network is specified.")
+    if args.featnet_type == 'repvgg_b0':
+        print("repvgg_b0 doesn't work with interpolation loss. Recommended: vit_tiny_patch16_224")
     exit(0)
 
 unet = Unet(
