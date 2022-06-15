@@ -204,9 +204,10 @@ if args.do_distillation and args.featnet_type == 'none':
 if args.interp_loss_weight > 0:
     if args.featnet_type == 'none':
         print("Interpolation loss is enabled, but no feature network is specified.")
+        exit(0)
     if args.featnet_type == 'repvgg_b0':
         print("repvgg_b0 doesn't work with interpolation loss. Recommended: vit_tiny_patch16_224")
-    exit(0)
+        exit(0)
 
 unet = Unet(
     dim = 64,
