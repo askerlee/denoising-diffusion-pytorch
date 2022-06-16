@@ -310,7 +310,7 @@ class Unet(nn.Module):
 
         mid_dim = dims[-1]
         self.mid_block1 = block_klass(mid_dim, mid_dim, time_emb_dim = time_dim)
-        self.mid_attn   = Residual(PreNorm(mid_dim, Attention(mid_dim, memory_size=memory_size)))
+        self.mid_attn   = Residual(PreNorm(mid_dim, Attention(mid_dim, memory_size=0)))
         # Seems setting kernel size to 1 leads to slightly worse images?
         self.mid_block2 = block_klass(mid_dim, mid_dim, kernel_size=1, time_emb_dim = time_dim)
 
