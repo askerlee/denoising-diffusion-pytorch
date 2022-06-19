@@ -56,6 +56,7 @@ class Trainer(object):
         self.ds = dataset
         self.debug = debug
         if not self.debug:
+            # DistributedSampler does shuffling by default.
             sampler = DistributedSampler(self.ds)
         else:
             sampler = None
@@ -326,6 +327,7 @@ if args.sample_only:
 trainer = Trainer(
     diffusion,
     dataset,                            # Dataset instance.
+    local_rank = args.local_rank,       # Local rank of the process.
     train_batch_size = args.batch_size, # default: 32
     train_lr = args.lr,                 # default: 1e-4
     train_num_steps = 700000,           # total training steps
