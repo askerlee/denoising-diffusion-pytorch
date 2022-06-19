@@ -291,6 +291,7 @@ class Unet(nn.Module):
             self.time_mlp = None
 
         self.num_classes = num_classes
+        self.cls_embed_type    = cls_embed_type
         # It's possible that self.num_classes < 0, i.e., the number of classes is not provided.
         # In this case, we set cls_embed_type to 'none'.
         if self.num_classes <= 0:
@@ -338,7 +339,6 @@ class Unet(nn.Module):
         self.featnet_type      = featnet_type
         self.finetune_tea_feat_ext  = finetune_tea_feat_ext
         self.distillation_type = distillation_type
-        self.cls_embed_type    = cls_embed_type
 
         if self.featnet_type != 'none' and self.featnet_type != 'mini':
             # Tried 'efficientnet_b0', but it doesn't perform well.
