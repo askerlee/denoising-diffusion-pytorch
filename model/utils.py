@@ -25,7 +25,7 @@ def cycle(dl, sampler):
         epoch += 1
         if sampler is not None:
             sampler.set_epoch(epoch)
-            
+
         for data in dl:
             yield data
 
