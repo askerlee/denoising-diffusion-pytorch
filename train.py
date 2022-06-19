@@ -64,7 +64,8 @@ class Trainer(object):
             sampler = None
 
         self.dl = cycle(data.DataLoader(self.ds, batch_size = train_batch_size, sampler = sampler, 
-                                        pin_memory=True, drop_last=True, num_workers=num_workers))
+                                        pin_memory=True, drop_last=True, num_workers=num_workers),
+                        sampler)
         self.opt = Adam(diffusion_model.parameters(), lr=train_lr, weight_decay=weight_decay)
 
         self.step = 0

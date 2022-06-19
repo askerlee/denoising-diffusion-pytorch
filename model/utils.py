@@ -19,8 +19,13 @@ def print0(*print_args, **kwargs):
     if local_rank == 0:
         print(*print_args, **kwargs)
 
-def cycle(dl):
+def cycle(dl, sampler):
+    epoch = 0
     while True:
+        epoch += 1
+        if sampler is not None:
+            sampler.set_epoch(epoch)
+            
         for data in dl:
             yield data
 
