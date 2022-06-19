@@ -117,7 +117,8 @@ class Trainer(object):
         self.scaler.load_state_dict(data['scaler'])
 
     def train(self):
-        with tqdm(initial = self.step, total = self.train_num_steps) as pbar:
+        is_master = (self.local_rank <= 0)
+        with tqdm(initial = self.step, total = self.train_num_steps, disable=not is_master) as pbar:
 
             while self.step < self.train_num_steps:
                 # Back up the weight of interp_feat_ext.
