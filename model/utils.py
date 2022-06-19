@@ -2,18 +2,39 @@ import torch
 import torch.nn as nn
 from torch.utils import data
 from torchvision import transforms, utils
+import torch.distributed as dist
+
 from pathlib import Path
 from PIL import Image
+import os
 import numpy as np
 import timm
 from .laplacian import LapLoss
 import imgaug.augmenters as iaa
 from torchvision.transforms import ColorJitter, ToTensor, ToPILImage
 
+# Only print on GPU0. Avoid duplicate messages.
+def print0(*print_args, **kwargs):
+    local_rank = int(os.environ.get('LOCAL_RANK', 0))
+    if local_rank == 0:
+        print(*print_args, **kwargs)
+
 def cycle(dl):
     while True:
         for data in dl:
             yield data
+
+def reduce_tensor(tensor, world_size):
+    rt = tensor.clone()
+    dist.all_reduce(rt, op=dist.ReduceOp.SUM)
+    rt /= world_size
+    return rt
+
+def gather_tensor(tensor, world_size):
+    tensor_list = [torch.zeros_like(tensor) for _ in range(world_size)]
+    dist.all_gather(tensor_list, tensor)
+    gathered_tensor = torch.cat(tensor_list, dim=0)
+    return gathered_tensor
 
 def num_to_groups(num, divisor):
     groups = num // divisor
@@ -30,7 +51,7 @@ class Dataset(data.Dataset):
         self.folder = folder
         self.image_size = image_size
         self.paths = [p for ext in exts for p in Path(f'{folder}').glob(f'**/*.{ext}')]
-        print("Found {} images in {}".format(len(self.paths), folder))
+        print0("Found {} images in {}".format(len(self.paths), folder))
 
         '''
         self.transform = transforms.Compose([
@@ -117,7 +138,7 @@ class EMA():
             return new
         return old * self.beta + (1 - self.beta) * new
 
-class DataParallelPassthrough(torch.nn.DataParallel):
+class DistributedDataParallelPassthrough(torch.nn.parallel.DistributedDataParallel):
     def __getattr__(self, name):
         try:
             return super().__getattr__(name)
@@ -129,7 +150,7 @@ def sample_images(model, num_images, batch_size, img_save_path):
     all_images_list = list(map(lambda n: model.sample(batch_size=n), batches))
     all_images = torch.cat(all_images_list, dim=0)
     utils.save_image(all_images, img_save_path, nrow = 6)
-    print(f"Sampled {img_save_path}")
+    print0(f"Sampled {img_save_path}")
 
 # For CNN models, just forward to forward_features().
 # For ViTs, patch the original timm code to keep the spatial dimensions of the extracted image features.

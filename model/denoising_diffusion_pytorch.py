@@ -10,7 +10,7 @@ from functools import partial
 import timm
 from einops import rearrange
 from .laplacian import LapLoss
-from .utils import timm_extract_features #, dual_teaching_loss
+from .utils import timm_extract_features, print0 #, dual_teaching_loss
 
 timm_model2dim = { 'resnet34': 512,
                    'resnet18': 512,
@@ -300,7 +300,7 @@ class Unet(nn.Module):
 
         if self.cls_embed_type != 'none':
             self.cls_embedding = nn.Embedding(self.num_classes, time_dim)
-            print("cls_embedding: ", list(self.cls_embedding.weight.shape))
+            print0("cls_embedding: ", list(self.cls_embedding.weight.shape))
         else:
             self.cls_embedding = None
 
@@ -625,13 +625,13 @@ class GaussianDiffusion(nn.Module):
         self.alpha_beta_schedule = alpha_beta_schedule
         
         if self.alpha_beta_schedule == 'cosb':
-            print("Use cosine_beta_schedule")
+            print0("Use cosine_beta_schedule")
             betas = cosine_beta_schedule(self.num_timesteps)
         elif self.alpha_beta_schedule == 'lina':
-            print("Use linear_alpha_schedule")
+            print0("Use linear_alpha_schedule")
             betas = linear_alpha_schedule(self.num_timesteps)
         elif self.alpha_beta_schedule == 'linb':
-            print("Use linear_beta_schedule")
+            print0("Use linear_beta_schedule")
             betas = linear_beta_schedule(self.num_timesteps)            
         else:
             breakpoint()
@@ -832,8 +832,8 @@ class GaussianDiffusion(nn.Module):
         x_noisy1 = x_start_weight * x_start + noise_weight * noise
 
         if self.debug and step >=0 and step < 10:
-            print(f'{step} x_start_weight\n{x_start_weight.flatten()}')
-            print(f'{step} noise_weight\n{noise_weight.flatten()}')
+            print0(f'{step} x_start_weight\n{x_start_weight.flatten()}')
+            print0(f'{step} noise_weight\n{noise_weight.flatten()}')
 
         # Conventional sampling. Do not sample for an easier t.
         if distill_t_frac == -1:
@@ -852,8 +852,8 @@ class GaussianDiffusion(nn.Module):
                 x_noisy2 = x_start_weight2 * x_start + noise_weight2 * noise
 
                 if self.debug and step >=0 and step < 10:
-                    print(f'{step} x_start_weight2\n{x_start_weight2.flatten()}')
-                    print(f'{step} noise_weight2\n{noise_weight2.flatten()}')
+                    print0(f'{step} x_start_weight2\n{x_start_weight2.flatten()}')
+                    print0(f'{step} noise_weight2\n{noise_weight2.flatten()}')
 
             return x_noisy1, x_noisy2
 
@@ -947,7 +947,7 @@ class GaussianDiffusion(nn.Module):
     def forward(self, img, classes, *args, **kwargs):
         b, c, h, w, device, img_size, = *img.shape, img.device, self.image_size
         if not (h == img_size and w == img_size):
-            print(f'height and width of image must be {img_size}')
+            print0(f'height and width of image must be {img_size}')
             breakpoint()
         
         if self.distillation_type == 'tfrac' and self.interp_loss_weight > 0:

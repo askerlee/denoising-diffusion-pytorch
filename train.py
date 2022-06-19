@@ -1,23 +1,28 @@
-from model import Unet, GaussianDiffusion, EMA, Dataset, cycle, DataParallelPassthrough, sample_images, AverageMeters
+from model import Unet, GaussianDiffusion, EMA, Dataset, cycle, DistributedDataParallelPassthrough, \
+                  sample_images, AverageMeters, print0, reduce_tensor
 import argparse
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.cuda.amp import autocast, GradScaler
 from torch.optim import Adam
+from torch.utils.data.distributed import DistributedSampler
 from torch.utils import data
 import os
 import copy
 from tqdm import tqdm
 from pathlib import Path
-# trainer class
+import random
+import numpy as np
 
+# trainer class
 class Trainer(object):
     def __init__(
         self,
         diffusion_model,
         dataset,
         *,
+        local_rank = -1,
         ema_decay = 0.995,
         image_size = 128,
         train_batch_size = 32,
@@ -31,6 +36,7 @@ class Trainer(object):
         save_and_sample_every = 1000,
         results_folder = './results',
         num_workers = 5,
+        debug = False,
     ):
         super().__init__()
         # model: GaussianDiffusion instance.
@@ -46,8 +52,15 @@ class Trainer(object):
         self.gradient_accumulate_every = gradient_accumulate_every
         self.train_num_steps = train_num_steps
 
+        self.local_rank = local_rank
         self.ds = dataset
-        self.dl = cycle(data.DataLoader(self.ds, batch_size = train_batch_size, shuffle=True, 
+        self.debug = debug
+        if not self.debug:
+            sampler = DistributedSampler(self.ds)
+        else:
+            sampler = None
+
+        self.dl = cycle(data.DataLoader(self.ds, batch_size = train_batch_size, sampler = sampler, 
                                         pin_memory=True, drop_last=True, num_workers=num_workers))
         self.opt = Adam(diffusion_model.parameters(), lr=train_lr, weight_decay=weight_decay)
 
@@ -72,6 +85,9 @@ class Trainer(object):
         self.ema.update_model_average(self.ema_model, self.model)
 
     def save(self, milestone):
+        if self.local_rank > 0:
+            return
+
         data = {
             'step':     self.step,
             'model':    self.model.state_dict(),
@@ -80,12 +96,23 @@ class Trainer(object):
         }
         torch.save(data, str(self.results_folder / f'model-{milestone}.pt'))
 
-    def load(self, milestone):
+    def load(self, milestone, rank=0):
+        def convert(param):
+            return {
+            k.replace("module.", ""): v
+                for k, v in param.items()
+                if "module." in k
+            }
+            
         data = torch.load(str(self.results_folder / f'model-{milestone}.pt'))
+        if self.local_rank < 0:
+            self.model.load_state_dict(convert(data['model']))
+            self.ema_model.load_state_dict(convert(data['ema']))
+        else:
+            self.model.load_state_dict(data['model'])
+            self.ema_model.load_state_dict(data['ema'])
 
         self.step = data['step']
-        self.model.load_state_dict(data['model'])
-        self.ema_model.load_state_dict(data['ema'])
         self.scaler.load_state_dict(data['scaler'])
 
     def train(self):
@@ -149,11 +176,11 @@ class Trainer(object):
                 self.step += 1
                 pbar.update(1)
 
-        print('Training completed')
+        print0('Training completed')
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--lr', type=float, default=2e-4, help="Learning rate")
-parser.add_argument('--bs', type=int, default=32, help="Batch size")
+parser.add_argument('--bs', dest='batch_size', type=int, default=32, help="Batch size")
 parser.add_argument('--cp', type=str, dest='cp_path', default=None, help="The path of a model checkpoint")
 parser.add_argument('--sample', dest='sample_only', action='store_true', help='Do sampling using a trained model')
 parser.add_argument('--workers', dest='num_workers', type=int, default=5, 
@@ -200,25 +227,47 @@ parser.add_argument('--winterp', dest='interp_loss_weight', default=0.0, type=fl
 parser.add_argument('--interpfullfeat', dest='interp_use_cls_feat', action='store_false', 
                     help='Do not use CLS feat, instead use the full featmaps when computing interpolation loss')                    
 
-args = parser.parse_args()
-print(f"Args:\n{args}")
 torch.set_printoptions(sci_mode=False)
+args = parser.parse_args()
+local_rank = int(os.environ.get('LOCAL_RANK', 0))
+if 'WORLD_SIZE' in os.environ:
+    args.world_size = int(os.environ['WORLD_SIZE'])
+    args.distributed = args.world_size > 1
+else:
+    args.world_size = 1
+args.batch_size //= args.world_size
+
+args.local_rank = local_rank
+print0(f"Args:\n{args}")
 
 if args.distillation_type == 'tfrac' and args.featnet_type == 'none':
-    print("Distillation type is 'tfrac', but no feature network is specified. ")
+    print0("Distillation type is 'tfrac', but no feature network is specified. ")
     exit(0)
 
 if args.interp_loss_weight > 0:
     if args.featnet_type == 'none':
-        print("Interpolation loss is enabled, but no feature network is specified.")
+        print0("Interpolation loss is enabled, but no feature network is specified.")
         exit(0)
     if args.featnet_type == 'repvgg_b0':
-        print("repvgg_b0 doesn't work with interpolation loss. Recommended: vit_tiny_patch16_224")
+        print0("repvgg_b0 doesn't work with interpolation loss. Recommended: vit_tiny_patch16_224")
         exit(0)
+
+if not args.debug:
+    torch.distributed.init_process_group(backend="nccl", init_method='env://')
+
+torch.cuda.set_device(args.local_rank)
+args.seed = 1234
+random.seed(args.seed)
+np.random.seed(args.seed)
+torch.manual_seed(args.seed)
+torch.cuda.manual_seed_all(args.seed)
+torch.backends.cudnn.benchmark = True
 
 dataset = Dataset(args.ds, image_size=128)
 num_images = len(dataset)
 num_classes = num_images
+
+print0(f"world size: {args.world_size}, batch size per GPU: {args.batch_size}, seed: {args.seed}")
 
 unet = Unet(
     dim = 64,
@@ -259,9 +308,11 @@ diffusion = GaussianDiffusion(
     debug = args.debug,
 )
 
-# default using two GPUs.
-diffusion = DataParallelPassthrough(diffusion, device_ids=args.gpus)
 diffusion.cuda()
+# default using two GPUs.
+diffusion = DistributedDataParallelPassthrough(diffusion, device_ids=[local_rank], 
+                                               output_device=local_rank,
+                                               find_unused_parameters=True)
 
 if args.cp_path is not None:
     diffusion.load_state_dict(torch.load(args.cp_path)['ema'])
@@ -269,18 +320,18 @@ if args.cp_path is not None:
 if args.sample_only:
     assert args.cp_path is not None, "Please specify a checkpoint path to load for sampling"
     cp_trunk = os.path.basename(args.cp_path).split('.')[0]
-    sample_images(diffusion, 36, args.bs, str(args.results_folder / f'{cp_trunk}-sample.png'))
+    sample_images(diffusion, 36, args.batch_size, str(args.results_folder / f'{cp_trunk}-sample.png'))
     exit()
 
 trainer = Trainer(
     diffusion,
-    dataset,                          # Dataset instance.
-    train_batch_size = args.bs,       # default: 32
-    train_lr = args.lr,               # default: 1e-4
-    train_num_steps = 700000,         # total training steps
-    gradient_accumulate_every = 2,    # gradient accumulation steps
-    ema_decay = 0.995,                # exponential moving average decay
-    amp = args.amp,                   # turn on mixed precision. Default: True
+    dataset,                            # Dataset instance.
+    train_batch_size = args.batch_size, # default: 32
+    train_lr = args.lr,                 # default: 1e-4
+    train_num_steps = 700000,           # total training steps
+    gradient_accumulate_every = 2,      # gradient accumulation steps
+    ema_decay = 0.995,                  # exponential moving average decay
+    amp = args.amp,                     # turn on mixed precision. Default: True
     results_folder = args.results_folder,
     save_and_sample_every = args.save_sample_interval,
 )
