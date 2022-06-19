@@ -23,6 +23,7 @@ class Trainer(object):
         dataset,
         *,
         local_rank = -1,
+        world_size = 1,
         ema_decay = 0.995,
         image_size = 128,
         train_batch_size = 32,
@@ -53,6 +54,7 @@ class Trainer(object):
         self.train_num_steps = train_num_steps
 
         self.local_rank = local_rank
+        self.world_size = world_size
         self.ds = dataset
         self.debug = debug
         if not self.debug:
@@ -138,17 +140,20 @@ class Trainer(object):
                         self.scaler.scale(loss / self.gradient_accumulate_every).backward()
 
                     loss_stu = loss_dict['loss_stu'].mean()
+                    loss_stu = reduce_tensor(loss_stu, self.world_size)
                     self.loss_meter.update('loss_stu', loss_stu.item())
                     avg_loss_stu = self.loss_meter.avg['disp']['loss_stu']
                     desc_items = [ f's {loss_stu.item():.3f}/{avg_loss_stu:.3f}' ]
 
                     if args.distillation_type != 'none':
                         loss_tea = loss_dict['loss_tea'].mean()
+                        loss_tea = reduce_tensor(loss_tea, self.world_size)
                         self.loss_meter.update('loss_tea', loss_tea.item())
                         avg_loss_tea = self.loss_meter.avg['disp']['loss_tea']
                         desc_items.append( f't {loss_tea.item():.3f}/{avg_loss_tea:.3f}' )
                     if args.interp_loss_weight > 0:
                         loss_interp = loss_dict['loss_interp'].mean()
+                        loss_interp = reduce_tensor(loss_interp, self.world_size)
                         self.loss_meter.update('loss_interp', loss_interp.item())
                         avg_loss_interp = self.loss_meter.avg['disp']['loss_interp']
                         desc_items.append( f'i {loss_interp.item():.3f}/{avg_loss_interp:.3f}' )
@@ -329,6 +334,7 @@ trainer = Trainer(
     diffusion,
     dataset,                            # Dataset instance.
     local_rank = args.local_rank,       # Local rank of the process.
+    world_size = args.world_size,       # Total number of processes.
     train_batch_size = args.batch_size, # default: 32
     train_lr = args.lr,                 # default: 1e-4
     train_num_steps = 700000,           # total training steps
