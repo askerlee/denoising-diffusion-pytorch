@@ -290,12 +290,13 @@ class Unet(nn.Module):
             time_dim = None
             self.time_mlp = None
 
-        self.num_classes = num_classes
-        self.cls_embed_type    = cls_embed_type
+        self.num_classes    = num_classes
         # It's possible that self.num_classes < 0, i.e., the number of classes is not provided.
         # In this case, we set cls_embed_type to 'none'.
         if self.num_classes <= 0:
             self.cls_embed_type = 'none'
+        else:
+            self.cls_embed_type = cls_embed_type
 
         if self.cls_embed_type != 'none':
             self.cls_embedding = nn.Embedding(self.num_classes, time_dim)
@@ -332,7 +333,7 @@ class Unet(nn.Module):
         mid_dim = dims[-1]
         self.mid_block1 = block_klass(mid_dim, mid_dim, time_emb_dim = time_dim)
         # Seems the memory in mid_attn doesn't make much difference.
-        self.mid_attn   = Residual(PreNorm(mid_dim, Attention(mid_dim, memory_size=memory_size)))
+        self.mid_attn   = Residual(PreNorm(mid_dim, Attention(mid_dim, memory_size=0)))
         # Seems setting kernel size to 1 leads to slightly worse images?
         self.mid_block2 = block_klass(mid_dim, mid_dim, kernel_size=1, time_emb_dim = time_dim)
 
