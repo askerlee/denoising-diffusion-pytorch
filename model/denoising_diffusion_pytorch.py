@@ -290,6 +290,18 @@ class Unet(nn.Module):
             time_dim = None
             self.time_mlp = None
 
+        self.num_classes = num_classes
+        # It's possible that self.num_classes < 0, i.e., the number of classes is not provided.
+        # In this case, we set cls_embed_type to 'none'.
+        if self.num_classes <= 0:
+            self.cls_embed_type = 'none'
+
+        if self.cls_embed_type != 'none':
+            self.cls_embedding = nn.Embedding(self.num_classes, time_dim)
+            print("cls_embedding: ", list(self.cls_embedding.weight.shape))
+        else:
+            self.cls_embedding = None
+
         # layers
 
         self.downs = nn.ModuleList([])
@@ -392,18 +404,6 @@ class Unet(nn.Module):
             block_klass(dim, dim),
             nn.Conv2d(dim, self.out_dim, 1)
         )
-
-        self.num_classes = num_classes
-        # It's possible that self.num_classes < 0, i.e., the number of classes is not provided.
-        # In this case, we set cls_embed_type to 'none'.
-        if self.num_classes <= 0:
-            self.cls_embed_type = 'none'
-
-        if self.cls_embed_type != 'none':
-            self.cls_embedding = nn.Embedding(self.num_classes, time_dim)
-            print("cls_embedding: ", list(self.cls_embedding.weight.shape))
-        else:
-            self.cls_embedding = None
 
     # extract_pre_feat(): extract features using a pretrained model.
     # use_cls_feat: use the features that feat_extractor uses to do the final classification. 
