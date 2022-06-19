@@ -401,6 +401,7 @@ class Unet(nn.Module):
 
         if self.cls_embed_type != 'none':
             self.cls_embedding = nn.Embedding(self.num_classes, time_dim)
+            print("cls_embedding: ", list(self.cls_embedding.weight.shape))
         else:
             self.cls_embedding = None
 
@@ -447,7 +448,7 @@ class Unet(nn.Module):
                 assert cls_embed is None
                 cls_embed = self.cls_embedding(classes)
             # cls_embed: [batch, 1, 1, time_dim=256].
-            cls_embed = cls_embed.view(classes.shape[0], *((1,) * (len(x.shape) - 2)), -1)
+            cls_embed = cls_embed.view(cls_embed.shape[0], *((1,) * (len(x.shape) - 2)), -1)
             # The teacher always sees the class embedding.
             t_tea = exists_add(t, cls_embed)
             # 'tea_stu': Both the student and teacher see the class embedding.
@@ -486,7 +487,7 @@ class Unet(nn.Module):
             noise_feat = None
 
         for ind, (block1, block2, attn, upsample) in enumerate(self.ups):
-            if self.distillation_type != 'none' and ind == 0:
+            if ind == 0 and exists(noise_feat):
                 x = torch.cat((x, h[-ind-1], noise_feat), dim=1)
             else:
                 x = torch.cat((x, h[-ind-1]), dim=1)
@@ -499,7 +500,6 @@ class Unet(nn.Module):
             x = upsample(x)
 
         pred_stu = self.final_conv(x)
-        tea_feat  = None
 
         # img_tea is provided. Do distillation.
         if self.distillation_type == 'tfrac' and exists(img_tea):
@@ -510,10 +510,10 @@ class Unet(nn.Module):
         else:
             tea_feat = None
 
-        if self.distillation_type != 'none':
+        if self.distillation_type != 'none' and exists(tea_feat):
             x = mid_feat
             for ind, (block1, block2, attn, upsample) in enumerate(self.ups_tea):
-                if ind == 0:
+                if ind == 0 and exists(tea_feat):
                     x = torch.cat((x, h[-ind-1], tea_feat), dim=1)
                 else:
                     x = torch.cat((x, h[-ind-1]), dim=1)
@@ -785,6 +785,7 @@ class GaussianDiffusion(nn.Module):
         # we interpolate class embedding as well, and pass it to the UNet.
         if self.cls_embed_type != 'none' and exists(classes):
             cls_embed = self.denoise_fn.cls_embedding(classes)
+            cls_embed = cls_embed.view(b, *((1,) * (len(img_noisy.shape) - 2)), -1)
             cls_embed1, cls_embed2 = cls_embed[:b2], cls_embed[b2:]
             cls_embed_interp = w * cls_embed1 + (1 - w) * cls_embed2
         else:

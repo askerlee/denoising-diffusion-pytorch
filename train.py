@@ -98,7 +98,7 @@ class Trainer(object):
                 for i in range(self.gradient_accumulate_every):
                     data = next(self.dl)
                     img     = data['img'].cuda()
-                    classes = torch.LongTensor(data['classes'], device='cuda')
+                    classes = data['classes'].cuda()
 
                     with autocast(enabled = self.amp):
                         loss_dict = self.model(img, classes, step=self.step)
