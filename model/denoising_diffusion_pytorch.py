@@ -733,7 +733,7 @@ class GaussianDiffusion(nn.Module):
             classes = torch.randint(0, self.num_classes, (b,), device=device)
 
         for i in reversed(range(0, self.num_timesteps)):
-            img = self.p_sample(img, torch.full((b,), i, classes=classes, device=device, dtype=torch.long))
+            img = self.p_sample(img, torch.full((b,), i, device=device, dtype=torch.long), classes=classes)
 
         img = unnormalize_to_zero_to_one(img)
         return img
@@ -760,7 +760,7 @@ class GaussianDiffusion(nn.Module):
         t_batch = torch.stack([torch.tensor(t, device=device)] * b)
         img = self.noisy_interpolate(x1, x2, t_batch, w)
         for i in reversed(range(0, t)):
-            img = self.p_sample(img, torch.full((b,), i, classes=None, device=device, dtype=torch.long))
+            img = self.p_sample(img, torch.full((b,), i, device=device, dtype=torch.long), classes=None)
 
         return img
 
