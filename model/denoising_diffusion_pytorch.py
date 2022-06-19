@@ -24,6 +24,12 @@ timm_model2dim = { 'resnet34': 512,
 def exists(x):
     return x is not None
 
+def exists_add(x, a):
+    if exists(x):
+        return x + a
+    else:
+        return a
+
 def default(val, d):
     if exists(val):
         return val
@@ -245,10 +251,12 @@ class Unet(nn.Module):
         with_time_emb = True,
         resnet_block_groups = 8,
         memory_size = 1024,
+        num_classes = -1,
         learned_variance = False,
         featnet_type = 'none',
         finetune_tea_feat_ext = False,
-        do_distillation = False,
+        distillation_type = 'none',
+        cls_embed_type = 'none',
     ):
         super().__init__()
 
@@ -310,13 +318,15 @@ class Unet(nn.Module):
 
         mid_dim = dims[-1]
         self.mid_block1 = block_klass(mid_dim, mid_dim, time_emb_dim = time_dim)
-        self.mid_attn   = Residual(PreNorm(mid_dim, Attention(mid_dim, memory_size=0)))
+        # Seems the memory in mid_attn doesn't make much difference.
+        self.mid_attn   = Residual(PreNorm(mid_dim, Attention(mid_dim, memory_size=memory_size)))
         # Seems setting kernel size to 1 leads to slightly worse images?
         self.mid_block2 = block_klass(mid_dim, mid_dim, kernel_size=1, time_emb_dim = time_dim)
 
         self.featnet_type      = featnet_type
         self.finetune_tea_feat_ext  = finetune_tea_feat_ext
-        self.do_distillation   = do_distillation
+        self.distillation_type = distillation_type
+        self.cls_embed_type    = cls_embed_type
 
         if self.featnet_type != 'none' and self.featnet_type != 'mini':
             # Tried 'efficientnet_b0', but it doesn't perform well.
@@ -325,7 +335,7 @@ class Unet(nn.Module):
             self.featnet_dim    = timm_model2dim[self.featnet_type]
             self.interp_feat_ext    = timm.create_model(self.featnet_type, pretrained=True)
 
-            if self.do_distillation:
+            if self.distillation_type != 'none':
                 self.dist_feat_ext_tea  = timm.create_model(self.featnet_type, pretrained=True)
                 self.dist_feat_ext_stu  = timm.create_model(self.featnet_type, pretrained=True)
             else:
@@ -336,14 +346,17 @@ class Unet(nn.Module):
             self.dist_feat_ext_tea = None
             self.dist_feat_ext_stu = None
 
-        if (not self.do_distillation) or self.featnet_type == 'none':
+        # distillation_type: 'none' or 'tfrac'. 
+        if self.distillation_type == 'none':
             extra_up_dim = 0
-        elif self.featnet_type == 'mini':
-            extra_up_dim = 3
+        # tfrac: teacher sees less-noisy images (either sees a miniature or through a feature network)
         else:
-            # number of output features from the image feature extractor.
-            extra_up_dim = self.featnet_dim
-
+            if self.featnet_type == 'mini':
+                extra_up_dim = 3
+            else:
+                # number of output features from the image feature extractor.
+                extra_up_dim = self.featnet_dim
+        
         extra_up_dims = [ extra_up_dim ] + [0] * (num_resolutions - 1)
                         
         for ind, (dim_in, dim_out) in enumerate(reversed(in_out[1:])):
@@ -380,7 +393,20 @@ class Unet(nn.Module):
             nn.Conv2d(dim, self.out_dim, 1)
         )
 
+        self.num_classes = num_classes
+        # It's possible that self.num_classes < 0, i.e., the number of classes is not provided.
+        # In this case, we set cls_embed_type to 'none'.
+        if self.num_classes <= 0:
+            self.cls_embed_type = 'none'
+
+        if self.cls_embed_type != 'none':
+            self.cls_embedding = nn.Embedding(self.num_classes, time_dim)
+        else:
+            self.cls_embedding = None
+
     # extract_pre_feat(): extract features using a pretrained model.
+    # use_cls_feat: use the features that feat_extractor uses to do the final classification. 
+    # It's not relevant to class embeddings used in as part of Unet features.
     def extract_pre_feat(self, feat_extractor, img, ref_shape, has_grad=True, use_cls_feat=False):
         if self.featnet_type == 'none':
             return None
@@ -397,13 +423,13 @@ class Unet(nn.Module):
                 with torch.no_grad():
                     distill_feat = timm_extract_features(feat_extractor, img, use_cls_feat)                
 
-        if ref_shape is not None:
+        if exists(ref_shape):
             # For 128x128 images, vit features are 4x4. Resize to 16x16.
             distill_feat = F.interpolate(distill_feat, size=ref_shape, mode='bilinear', align_corners=False)
         # Otherwise, do not resize distill_feat.
         return distill_feat
 
-    def forward(self, x, time, img_tea=None):
+    def forward(self, x, time, classes=None, cls_embed=None, img_tea=None):
         init_noise = x
         x = self.init_conv(x)
         # t: time embedding.
@@ -413,6 +439,21 @@ class Unet(nn.Module):
             t = t.view(time.shape[0], *((1,) * (len(x.shape) - 2)), -1)
         else:
             t = None
+
+        if self.cls_embed_type != 'none':
+            # If classes is provided, cls_embed should be None.
+            # If cls_embed is provided, classes should be None (but we didn't check it yet).
+            if exists(classes):
+                assert cls_embed is None
+                cls_embed = self.cls_embedding(classes)
+            # cls_embed: [batch, 1, 1, time_dim=256].
+            cls_embed = cls_embed.view(classes.shape[0], *((1,) * (len(x.shape) - 2)), -1)
+            # The teacher always sees the class embedding.
+            t_tea = exists_add(t, cls_embed)
+            # 'tea_stu': Both the student and teacher see the class embedding.
+            t_stu = t_tea if self.cls_embed_type == 'tea_stu' else t
+        else:
+            t_stu = t_tea = t
 
         h = []
 
@@ -436,7 +477,7 @@ class Unet(nn.Module):
 
         mid_feat = x
 
-        if self.do_distillation:
+        if self.distillation_type == 'tfrac':
         # Always fine-tune the student feature extractor.
             noise_feat = self.extract_pre_feat(self.dist_feat_ext_stu, init_noise, 
                                                mid_feat.shape[2:], 
@@ -445,13 +486,13 @@ class Unet(nn.Module):
             noise_feat = None
 
         for ind, (block1, block2, attn, upsample) in enumerate(self.ups):
-            if self.do_distillation and ind == 0:
+            if self.distillation_type != 'none' and ind == 0:
                 x = torch.cat((x, h[-ind-1], noise_feat), dim=1)
             else:
                 x = torch.cat((x, h[-ind-1]), dim=1)
 
-            x = block1(x, t)
-            x = block2(x, t)
+            x = block1(x, t_stu)
+            x = block2(x, t_stu)
             x = attn(x)
             # All blocks above don't change feature resolution. Only upsample explicitly here.
             # upsample() is a 4x4 conv, stride-2 transposed conv.
@@ -461,21 +502,24 @@ class Unet(nn.Module):
         tea_feat  = None
 
         # img_tea is provided. Do distillation.
-        if self.do_distillation and img_tea is not None:
-            x = mid_feat
+        if self.distillation_type == 'tfrac' and exists(img_tea):
             # finetune_tea_feat_ext controls whether to fine-tune the teacher feature extractor.
             tea_feat = self.extract_pre_feat(self.dist_feat_ext_tea, img_tea, 
                                              mid_feat.shape[2:], 
                                              has_grad=self.finetune_tea_feat_ext)
+        else:
+            tea_feat = None
 
+        if self.distillation_type != 'none':
+            x = mid_feat
             for ind, (block1, block2, attn, upsample) in enumerate(self.ups_tea):
                 if ind == 0:
                     x = torch.cat((x, h[-ind-1], tea_feat), dim=1)
                 else:
                     x = torch.cat((x, h[-ind-1]), dim=1)
 
-                x = block1(x, t)
-                x = block2(x, t)
+                x = block1(x, t_tea)
+                x = block2(x, t_tea)
                 x = attn(x)
                 # All blocks above don't change feature resolution. Only upsample explicitly here.
                 # upsample() is a 4x4 conv, stride-2 transposed conv.
@@ -537,8 +581,10 @@ class GaussianDiffusion(nn.Module):
         loss_type = 'l1',
         objective = 'pred_noise',
         featnet_type = 'none',
-        do_distillation = False,
+        distillation_type = 'none',
         distill_t_frac = 0.,
+        cls_embed_type = 'none',
+        num_classes = -1,
         interp_loss_weight = 0.,
         interp_use_cls_feat = True,
         align_tea_stu_feat_weight = 0,
@@ -560,8 +606,15 @@ class GaussianDiffusion(nn.Module):
         self.denoise_fn         = denoise_fn    # Unet
         self.objective          = objective
         self.featnet_type       = featnet_type
-        self.do_distillation    = do_distillation
-        self.distill_t_frac     = distill_t_frac if self.do_distillation  else -1
+        self.distillation_type  = distillation_type
+        self.distill_t_frac     = distill_t_frac if (self.distillation_type == 'tfrac') else -1
+        self.cls_embed_type     = cls_embed_type
+        self.num_classes        = num_classes
+        # It's possible that self.num_classes < 0, i.e., the number of classes is not provided.
+        # In this case, we set cls_embed_type to 'none'.
+        if self.num_classes <= 0:
+            self.cls_embed_type = 'none'
+
         self.interp_loss_weight     = interp_loss_weight
         self.interp_use_cls_feat    = interp_use_cls_feat
         self.align_tea_stu_feat_weight = align_tea_stu_feat_weight
@@ -637,8 +690,8 @@ class GaussianDiffusion(nn.Module):
         return posterior_mean, posterior_variance, posterior_log_variance_clipped
 
     # p_mean_variance() returns the denoised/generated image mean and noise variance.
-    def p_mean_variance(self, x, t, clip_denoised: bool):
-        model_output_dict = self.denoise_fn(x, t)
+    def p_mean_variance(self, x, t, classes, clip_denoised: bool):
+        model_output_dict = self.denoise_fn(x, t, classes=classes)
         model_output = model_output_dict['pred_stu']
 
         if self.objective == 'pred_noise':
@@ -660,9 +713,9 @@ class GaussianDiffusion(nn.Module):
     # it results in a stochastic denoising trajectory,
     # i.e., may generate different images given the same input noise.
     @torch.no_grad()
-    def p_sample(self, x, t, clip_denoised=True, repeat_noise=False):
+    def p_sample(self, x, t, classes=None, clip_denoised=True, repeat_noise=False):
         b, *_, device = *x.shape, x.device
-        model_mean, _, model_log_variance = self.p_mean_variance(x=x, t=t, clip_denoised=clip_denoised)
+        model_mean, _, model_log_variance = self.p_mean_variance(x=x, t=t, classes=classes, clip_denoised=clip_denoised)
         noise = noise_like(x.shape, device, repeat_noise)
         # no noise when t == 0
         nonzero_mask = (1 - (t == 0).float()).reshape(b, *((1,) * (len(x.shape) - 1)))
@@ -674,9 +727,13 @@ class GaussianDiffusion(nn.Module):
 
         b = shape[0]
         img = torch.randn(shape, device=device)
+        if self.cls_embed_type == 'none':
+            classes = None
+        else:
+            classes = torch.randint(0, self.num_classes, (b,), device=device)
 
         for i in reversed(range(0, self.num_timesteps)):
-            img = self.p_sample(img, torch.full((b,), i, device=device, dtype=torch.long))
+            img = self.p_sample(img, torch.full((b,), i, classes=classes, device=device, dtype=torch.long))
 
         img = unnormalize_to_zero_to_one(img)
         return img
@@ -693,8 +750,8 @@ class GaussianDiffusion(nn.Module):
         # Otherwise it's difficult to deal with different time embeddings of xt1 and xt2.
         xt1, xt2 = map(lambda x: self.q_sample(x, t=t_batch), (x1, x2))
 
-        interp_img = w * x1 + (1 - w) * x2 
-        return interp_img
+        img_interp = w * x1 + (1 - w) * x2 
+        return img_interp
 
     @torch.no_grad()
     def image_interpolate(self, x1, x2, t = None, w = 0.5):
@@ -703,12 +760,12 @@ class GaussianDiffusion(nn.Module):
         t_batch = torch.stack([torch.tensor(t, device=device)] * b)
         img = self.noisy_interpolate(x1, x2, t_batch, w)
         for i in reversed(range(0, t)):
-            img = self.p_sample(img, torch.full((b,), i, device=device, dtype=torch.long))
+            img = self.p_sample(img, torch.full((b,), i, classes=None, device=device, dtype=torch.long))
 
         return img
 
     # x is already added with noises.
-    def calc_interpolation_loss(self, img_noisy, img_gt, t, min_interp_w = 0.3):
+    def calc_interpolation_loss(self, img_noisy, img_gt, t, classes, min_interp_w = 0.3):
         b = img_noisy.shape[0]
         assert b % 2 == 0
         b2 = b // 2
@@ -722,19 +779,28 @@ class GaussianDiffusion(nn.Module):
         # Normalize w into [min_interp_w, 1-min_interp_w], i.e., [0.2, 0.8].
         w = (1 - 2 * min_interp_w) * w + min_interp_w
         w = w.view(b2, *((1,) * (len(img_noisy.shape) - 1)))
-        interp_img = w * x1 + (1 - w) * x2 
+        img_interp = w * x1 + (1 - w) * x2 
+
+        # If class embedding is used (either tea only or both tea/stu), 
+        # we interpolate class embedding as well, and pass it to the UNet.
+        if self.cls_embed_type != 'none' and exists(classes):
+            cls_embed = self.denoise_fn.cls_embedding(classes)
+            cls_embed1, cls_embed2 = cls_embed[:b2], cls_embed[b2:]
+            cls_embed_interp = w * cls_embed1 + (1 - w) * cls_embed2
+        else:
+            cls_embed_interp = None
 
         # Setting the last param (img_tea) to None, so that teacher module won't be executed, 
         # to reduce unnecessary compute.
-        model_output_dict = self.denoise_fn(interp_img, t2, None)
-        interp_pred = model_output_dict['pred_stu']
+        model_output_dict = self.denoise_fn(img_interp, t2, cls_embed=cls_embed_interp)
+        pred_interp = model_output_dict['pred_stu']
 
         if self.objective == 'pred_noise':
-            # interp_pred is the predicted noises. Subtract it from interp_img to get the predicted image.
-            interp_pred = self.predict_start_from_noise(interp_img, t2, interp_pred)
-        # otherwise, objective is 'pred_x0', and interp_pred is already the predicted image.
+            # pred_interp is the predicted noises. Subtract it from img_interp to get the predicted image.
+            pred_interp = self.predict_start_from_noise(img_interp, t2, pred_interp)
+        # otherwise, objective is 'pred_x0', and pred_interp is already the predicted image.
             
-        feat_interp = self.denoise_fn.extract_pre_feat(self.denoise_fn.interp_feat_ext, interp_pred, None, 
+        feat_interp = self.denoise_fn.extract_pre_feat(self.denoise_fn.interp_feat_ext, pred_interp, None, 
                                                        has_grad=True, use_cls_feat=self.interp_use_cls_feat)
 
         loss_interp1 = self.loss_fn(feat_interp, feat_gt1, reduction='none')
@@ -814,7 +880,7 @@ class GaussianDiffusion(nn.Module):
             raise ValueError(f'invalid loss type {self.loss_type}')
 
     # x_start: initial image.
-    def p_losses(self, x_start, t, noise = None, step=0):
+    def p_losses(self, x_start, t, classes, noise = None, step=0):
         b, c, h, w = x_start.shape
         # noise: a Gaussian noise for each pixel.
         noise = default(noise, lambda: torch.randn_like(x_start))
@@ -829,10 +895,10 @@ class GaussianDiffusion(nn.Module):
 
         if self.debug and step < 10:
             utils.save_image(x, f'{self.output_dir}/{step}-stu.png')
-            if x_tea is not None:
+            if exists(x_tea):
                 utils.save_image(x_tea, f'{self.output_dir}/{step}-tea.png')
 
-        model_output_dict    = self.denoise_fn(x, t, x_tea)
+        model_output_dict    = self.denoise_fn(x, t, classes=classes, img_tea=x_tea)
         pred_stu, pred_tea   = model_output_dict['pred_stu'],   model_output_dict['pred_tea']
         noise_feat, tea_feat = model_output_dict['noise_feat'], model_output_dict['tea_feat']
 
@@ -852,7 +918,7 @@ class GaussianDiffusion(nn.Module):
             raise ValueError(f'unknown objective {self.objective}')
 
         loss_stu = self.loss_fn(pred_stu, target)
-        if self.do_distillation:
+        if self.distillation_type != 'none':
             loss_tea    = self.loss_fn(pred_tea, target)
             if self.featnet_type != 'mini':
                 loss_align_tea_stu = F.l1_loss(noise_feat, tea_feat.detach())
@@ -863,7 +929,7 @@ class GaussianDiffusion(nn.Module):
             loss_align_tea_stu = torch.zeros_like(loss_stu)
 
         if self.interp_loss_weight > 0:
-            loss_interp = self.calc_interpolation_loss(x, x_start, t)
+            loss_interp = self.calc_interpolation_loss(x, x_start, t, classes)
         else:
             loss_interp = torch.zeros_like(loss_stu)
 
@@ -876,13 +942,13 @@ class GaussianDiffusion(nn.Module):
             loss = loss / loss.item()
         return { 'loss': loss, 'loss_stu': loss_stu, 'loss_tea': loss_tea, 'loss_interp': loss_interp }
 
-    def forward(self, img, *args, **kwargs):
+    def forward(self, img, classes, *args, **kwargs):
         b, c, h, w, device, img_size, = *img.shape, img.device, self.image_size
         if not (h == img_size and w == img_size):
             print(f'height and width of image must be {img_size}')
             breakpoint()
         
-        if self.interp_loss_weight > 0:
+        if self.distillation_type == 'tfrac' and self.interp_loss_weight > 0:
             assert b % 2 == 0
             # Two sub-batches use the same random timesteps.
             t = torch.randint(0, self.num_timesteps, (b//2, ), device=device).long().repeat(2)
@@ -892,5 +958,5 @@ class GaussianDiffusion(nn.Module):
             t = torch.randint(0, self.num_timesteps, (b, ), device=device).long()
 
         img = normalize_to_neg_one_to_one(img)
-        return self.p_losses(img, t, *args, **kwargs)
+        return self.p_losses(img, t, classes, *args, **kwargs)
 

@@ -16,7 +16,7 @@ class Trainer(object):
     def __init__(
         self,
         diffusion_model,
-        folder,
+        dataset,
         *,
         ema_decay = 0.995,
         image_size = 128,
@@ -46,7 +46,7 @@ class Trainer(object):
         self.gradient_accumulate_every = gradient_accumulate_every
         self.train_num_steps = train_num_steps
 
-        self.ds = Dataset(folder, image_size)
+        self.ds = dataset
         self.dl = cycle(data.DataLoader(self.ds, batch_size = train_batch_size, shuffle=True, 
                                         pin_memory=True, drop_last=True, num_workers=num_workers))
         self.opt = Adam(diffusion_model.parameters(), lr=train_lr, weight_decay=weight_decay)
@@ -96,10 +96,12 @@ class Trainer(object):
                 interp_feat_ext = copy.deepcopy(self.model.denoise_fn.interp_feat_ext)
 
                 for i in range(self.gradient_accumulate_every):
-                    data = next(self.dl).cuda()
+                    data = next(self.dl)
+                    img     = data['img'].cuda()
+                    classes = torch.LongTensor(data['classes'], device='cuda')
 
                     with autocast(enabled = self.amp):
-                        loss_dict = self.model(data, step=self.step)
+                        loss_dict = self.model(img, classes, step=self.step)
                         # For multiple GPUs, loss is a list.
                         # Since the loss on each GPU is MAE per pixel, we should also average them here,
                         # to make the loss consistent with being on a single GPU.
@@ -111,7 +113,7 @@ class Trainer(object):
                     avg_loss_stu = self.loss_meter.avg['disp']['loss_stu']
                     desc_items = [ f's {loss_stu.item():.3f}/{avg_loss_stu:.3f}' ]
 
-                    if args.do_distillation:
+                    if args.distillation_type != 'none':
                         loss_tea = loss_dict['loss_tea'].mean()
                         self.loss_meter.update('loss_tea', loss_tea.item())
                         avg_loss_tea = self.loss_meter.avg['disp']['loss_tea']
@@ -147,7 +149,7 @@ class Trainer(object):
                 self.step += 1
                 pbar.update(1)
 
-        print('training complete')
+        print('Training completed')
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--lr', type=float, default=2e-4, help="Learning rate")
@@ -180,14 +182,18 @@ parser.add_argument('--featnet', dest='featnet_type',
                               'mobilenetv2_120d', 'vit_base_patch8_224', 'vit_tiny_patch16_224' ], 
                     default='vit_tiny_patch16_224', 
                     help='Type of the feature network. Used by the distillation and interpolation losses.')
-parser.add_argument('--distill', dest='do_distillation', action='store_true', help='Do distillation')                    
+parser.add_argument('--distill', dest='distillation_type', choices=['none', 'tfrac'], default='none', 
+                    help='Distillation type')
 parser.add_argument('--dtfrac', dest='distill_t_frac', default=0.8, type=float, 
-                    help='Fraction of t of noise to be added to teacher images (the smaller, the less noise is added to groundtruth images)')   
+                    help='Fraction of t of noise to be added to teacher images '
+                         '(the smaller, the less noise is added to groundtruth images)')                          
 parser.add_argument('--tuneteacher', dest='finetune_tea_feat_ext', default=False, action='store_true', 
                     help='Fine-tune the pretrained image feature extractor of the teacher model (default: freeze it).')
 parser.add_argument('--alignfeat', dest='align_tea_stu_feat_weight', default=0.0, type=float, 
                     help='Align the features of the feature extractors of the teacher and the student. '
                     'Default: 0.0, meaning no alignment.')
+parser.add_argument('--clsembed', dest='cls_embed_type', choices=['none', 'tea_stu', 'tea_only'], default='none', 
+                    help='How class embedding is incorporated in the student and teacher')
 parser.add_argument('--winterp', dest='interp_loss_weight', default=0.0, type=float, 
                     help='Interpolate random image pairs for better latent space semantics structure. '
                     'Default: 0.0, meaning no interpolation loss.')
@@ -198,9 +204,10 @@ args = parser.parse_args()
 print(f"Args:\n{args}")
 torch.set_printoptions(sci_mode=False)
 
-if args.do_distillation and args.featnet_type == 'none':
-    print("Distillation is enabled, but no feature network is specified. ")
+if args.distillation_type == 'tfrac' and args.featnet_type == 'none':
+    print("Distillation type is 'tfrac', but no feature network is specified. ")
     exit(0)
+
 if args.interp_loss_weight > 0:
     if args.featnet_type == 'none':
         print("Interpolation loss is enabled, but no feature network is specified.")
@@ -209,19 +216,25 @@ if args.interp_loss_weight > 0:
         print("repvgg_b0 doesn't work with interpolation loss. Recommended: vit_tiny_patch16_224")
         exit(0)
 
+dataset = Dataset(args.ds, image_size=128)
+num_images = len(dataset)
+num_classes = num_images
+
 unet = Unet(
     dim = 64,
     dim_mults = (1, 2, 4, 8),
     # with_time_emb = True, do time embedding.
     memory_size = args.memory_size,
-    # if do_distillation and featnet_type=='mini', use a miniature of original images as privileged information to train the teacher model.
-    # if do_distillation and featnet_type=='resnet34' or another model name, 
+    num_classes = num_images,
+    # if do distillation and featnet_type=='mini', use a miniature of original images as privileged information to train the teacher model.
+    # if do distillation and featnet_type=='resnet34' or another model name, 
     # use image features extracted with a pretrained model to train the teacher model.
     featnet_type = args.featnet_type,
-    do_distillation = args.do_distillation,
+    distillation_type = args.distillation_type,
     # if finetune_tea_feat_ext=False,
     # do not finetune the pretrained image feature extractor of the teacher model.
-    finetune_tea_feat_ext = args.finetune_tea_feat_ext
+    finetune_tea_feat_ext = args.finetune_tea_feat_ext,
+    cls_embed_type = args.cls_embed_type,
 )
 
 diffusion = GaussianDiffusion(
@@ -231,12 +244,14 @@ diffusion = GaussianDiffusion(
     alpha_beta_schedule = args.alpha_beta_schedule, # alpha/beta schedule
     loss_type = args.loss_type,         # L1, L2, lap (Laplacian)
     objective = args.objective_type,    # objective type, pred_noise or pred_x0
-    # if do_distillation and featnet_type=='mini', use a miniature of original images as privileged information to train the teacher model.
-    # if do_distillation and featnet_type=='resnet34' or another model name, 
+    # if do distillation and featnet_type=='mini', use a miniature of original images as privileged information to train the teacher model.
+    # if do distillation and featnet_type=='resnet34' or another model name, 
     # use image features extracted with a pretrained model to train the teacher model.
     featnet_type = args.featnet_type,
-    do_distillation = args.do_distillation,
+    distillation_type = args.distillation_type,
     distill_t_frac = args.distill_t_frac,
+    cls_embed_type = args.cls_embed_type,
+    num_classes = num_images,
     interp_loss_weight = args.interp_loss_weight,
     interp_use_cls_feat = args.interp_use_cls_feat,
     align_tea_stu_feat_weight = args.align_tea_stu_feat_weight,
@@ -259,7 +274,7 @@ if args.sample_only:
 
 trainer = Trainer(
     diffusion,
-    args.ds,                          # dataset path. Default: imagenet
+    dataset,                          # Dataset instance.
     train_batch_size = args.bs,       # default: 32
     train_lr = args.lr,               # default: 1e-4
     train_num_steps = 700000,         # total training steps

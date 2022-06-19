@@ -98,7 +98,9 @@ class Dataset(data.Dataset):
         path = self.paths[index]
         img = np.array(Image.open(path))
         img_aug = self.geo_aug_func.augment_image(np.array(img)).copy()
-        return self.tv_transform(img_aug)
+        img_aug = self.tv_transform(img_aug)
+        # For small datasets such as pokemon, use index as the image classes.
+        return { 'img': img_aug, 'classes': index }
 
 class EMA():
     def __init__(self, beta):
