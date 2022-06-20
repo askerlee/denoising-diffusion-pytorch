@@ -94,7 +94,7 @@ class ResnetBlock(nn.Module):
         self.mlp = nn.Sequential(
             nn.SiLU(),      # Sigmoid Linear Unit, aka swish. https://pytorch.org/docs/stable/_images/SiLU.png
             nn.Linear(time_emb_dim, dim_out),
-            LayerNorm(dim_out)       # Newly added.
+            nn.LayerNorm(dim_out)       # Newly added.
         ) if exists(time_emb_dim) else None
 
         # block1 and block2 are ended with a group norm and a SiLU activation.
@@ -251,7 +251,7 @@ class Unet(nn.Module):
                 nn.Linear(dim, time_dim),
                 nn.GELU(),
                 nn.Linear(time_dim, time_dim),
-                LayerNorm(time_dim),        # Newly added
+                nn.LayerNorm(time_dim),        # Newly added
             )
         else:
             time_dim = None
@@ -267,7 +267,7 @@ class Unet(nn.Module):
 
         if self.cls_embed_type != 'none':
             self.cls_embedding = nn.Embedding(self.num_classes, time_dim)
-            self.cls_embed_ln  = LayerNorm(time_dim)
+            self.cls_embed_ln  = nn.LayerNorm(time_dim)
             print0("cls_embedding: ", list(self.cls_embedding.weight.shape))
         else:
             self.cls_embedding = None
