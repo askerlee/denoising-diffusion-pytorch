@@ -11,7 +11,8 @@ import numpy as np
 import timm
 from .laplacian import LapLoss
 import imgaug.augmenters as iaa
-from torchvision.transforms import ColorJitter, ToTensor, ToPILImage
+from torchvision.transforms import ColorJitter, ToTensor, ToPILImage, Resize
+from inspect import isfunction
 
 # Only print on GPU0. Avoid duplicate messages.
 def print0(*print_args, **kwargs):
@@ -28,6 +29,16 @@ def cycle(dl, sampler):
 
         for data in dl:
             yield data
+
+
+def exists(x):
+    return x is not None
+
+def exists_add(x, a):
+    if exists(x):
+        return x + a
+    else:
+        return a
 
 def reduce_tensor(tensor, world_size):
     rt = tensor.clone()
@@ -49,23 +60,28 @@ def num_to_groups(num, divisor):
         arr.append(remainder)
     return arr
     
-# dataset classes
+# A simple dataset class.
 class Dataset(data.Dataset):
     def __init__(self, folder, image_size, exts = ['jpg', 'jpeg', 'png']):
         super().__init__()
         self.folder = folder
         self.image_size = image_size
         self.paths = [p for ext in exts for p in Path(f'{folder}').glob(f'**/*.{ext}')]
+        # Each class maps to a list of image indices. Since for simple datasets like pokemon,
+        # each class is one image, so each list of indices just maps to 
+        # one element: the class index itself (but note it's in a list).
+        # For other datasets like Imagenet, each cls2indices entry should contain more images.
+        self.cls2indices = [ [i] for i in range(len(self.paths)) ]
+        
         print0("Found {} images in {}".format(len(self.paths), folder))
+        self.training = True
 
-        '''
-        self.transform = transforms.Compose([
-            transforms.Resize(image_size),
-            transforms.RandomHorizontalFlip(),
-            transforms.CenterCrop(image_size),
-            transforms.ToTensor()
+        self.test_transform = transforms.Compose([
+            ToPILImage(),
+            Resize(image_size),
+            ToTensor()
         ])
-        '''
+
         affine_prob     = 0.1
         perspect_prob   = 0.1 
 
@@ -123,8 +139,13 @@ class Dataset(data.Dataset):
     def __getitem__(self, index):
         path = self.paths[index]
         img = np.array(Image.open(path))
-        img_aug = self.geo_aug_func.augment_image(np.array(img)).copy()
-        img_aug = self.tv_transform(img_aug)
+
+        if self.training:
+            img_aug = self.geo_aug_func.augment_image(np.array(img)).copy()
+            img_aug = self.tv_transform(img_aug)
+        else:
+            img_aug = self.test_transform(img)
+
         # For small datasets such as pokemon, use index as the image classes.
         return { 'img': img_aug, 'classes': index }
 
@@ -150,12 +171,24 @@ class DistributedDataParallelPassthrough(torch.nn.parallel.DistributedDataParall
         except AttributeError:
             return getattr(self.module, name)
 
-def sample_images(model, num_images, batch_size, img_save_path):
+def sample_images(model, num_images, batch_size, dataset, img_save_path, nn_save_path):
     batches = num_to_groups(num_images, batch_size)
-    all_images_list = list(map(lambda n: model.sample(batch_size=n), batches))
-    all_images = torch.cat(all_images_list, dim=0)
-    utils.save_image(all_images, img_save_path, nrow = 6)
-    print0(f"Sampled {img_save_path}")
+    # In all_images_list, each element is a batch of images.
+    # In all_nn_list, if dataset is provided, each element is a batch of nearest neighbor images. 
+    # Otherwise, all_nn_list is a list of None.
+    all_images_nn_list = list(map(lambda n: model.sample(batch_size=n, dataset=dataset), batches))
+    all_images_list, all_nn_list = zip(*all_images_nn_list)
+    all_images      = torch.cat(all_images_list, dim=0)
+    utils.save_image(all_images,    img_save_path, nrow = 6)
+    print0(f"Sampled {img_save_path}. ", end="")
+
+    # If all_nn_list[0] is not None, then all elements in all_nn_list are not None.
+    if exists(all_nn_list[0]):
+        all_nn_images = torch.cat(all_nn_list, dim=0)
+        utils.save_image(all_nn_images, nn_save_path, nrow = 6)
+        print0(f"Nearest neighbors {nn_save_path}.")
+    else:
+        print0("")
 
 # For CNN models, just forward to forward_features().
 # For ViTs, patch the original timm code to keep the spatial dimensions of the extracted image features.
@@ -263,3 +296,27 @@ class AverageMeters:
 
             self.count[sig][key] += n
             self.avg[sig][key]    = self.sum[sig][key] / self.count[sig][key]
+
+# 5x faster than tensor.repeat_interleave().
+def repeat_interleave(x, n, dim):
+    if dim < 0:
+        dim += x.dim()
+    x2 = x.unsqueeze(dim+1)
+    repeats = [1] * (len(x.shape) + 1)
+    repeats[dim+1] = n
+    new_shape = list(x.shape)
+    new_shape[dim] *= n
+    x_rep = x2.repeat(repeats)
+    x_new = x_rep.reshape(new_shape)
+    return x_new
+
+def default(val, d):
+    if exists(val):
+        return val
+    return d() if isfunction(d) else d
+
+def normalize_to_neg_one_to_one(img):
+    return img * 2 - 1
+
+def unnormalize_to_zero_to_one(t):
+    return (t + 1) * 0.5

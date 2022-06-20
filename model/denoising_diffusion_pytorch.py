@@ -4,13 +4,13 @@ from torch import nn, einsum
 from torch.nn import Parameter
 import torch.nn.functional as F
 from torchvision import utils
-from inspect import isfunction
 from functools import partial
 
 import timm
 from einops import rearrange
 from .laplacian import LapLoss
-from .utils import timm_extract_features, print0 #, dual_teaching_loss
+from .utils import timm_extract_features, print0, exists, exists_add, repeat_interleave, \
+                   default, normalize_to_neg_one_to_one, unnormalize_to_zero_to_one
 
 timm_model2dim = { 'resnet34': 512,
                    'resnet18': 512,
@@ -18,41 +18,6 @@ timm_model2dim = { 'resnet34': 512,
                    'mobilenetv2_120d': 1280,
                    'vit_base_patch8_224': 768,
                    'vit_tiny_patch16_224': 192 }
-
-# helpers functions
-
-def exists(x):
-    return x is not None
-
-def exists_add(x, a):
-    if exists(x):
-        return x + a
-    else:
-        return a
-
-def default(val, d):
-    if exists(val):
-        return val
-    return d() if isfunction(d) else d
-
-def normalize_to_neg_one_to_one(img):
-    return img * 2 - 1
-
-def unnormalize_to_zero_to_one(t):
-    return (t + 1) * 0.5
-
-# 5x faster than tensor.repeat_interleave().
-def repeat_interleave(x, n, dim):
-    if dim < 0:
-        dim += x.dim()
-    x2 = x.unsqueeze(dim+1)
-    repeats = [1] * (len(x.shape) + 1)
-    repeats[dim+1] = n
-    new_shape = list(x.shape)
-    new_shape[dim] *= n
-    x_rep = x2.repeat(repeats)
-    x_new = x_rep.reshape(new_shape)
-    return x_new
 
 # small helper modules
 
@@ -737,13 +702,30 @@ class GaussianDiffusion(nn.Module):
             img = self.p_sample(img, torch.full((b,), i, device=device, dtype=torch.long), classes=classes)
 
         img = unnormalize_to_zero_to_one(img)
-        return img
+        return img, classes
 
     @torch.no_grad()
-    def sample(self, batch_size = 16):
+    def sample(self, batch_size = 16, dataset=None):
         image_size = self.image_size
         channels = self.channels
-        return self.p_sample_loop((batch_size, channels, image_size, image_size))
+        img, classes = self.p_sample_loop((batch_size, channels, image_size, image_size))
+        # Find nearest neighbors in dataset.
+        if exists(dataset):
+            if exists(classes):
+                # Take the first image as the representative image of each class in classes.
+                nn_img_indices = [ dataset.cls2indices[cls][0] for cls in classes ]
+                old_training_status = dataset.training
+                # training = False: Disable augmentation of fetched images.
+                dataset.training = False
+                nn_img_list = [ dataset[idx]['img'] for idx in nn_img_indices ]
+                dataset.training = old_training_status
+                nn_img = torch.stack(nn_img_list, dim=0).to(img.device)
+            else:
+                # Stub. Write VGG-based nn search code later.
+                return None
+        else:
+            return None
+        return img, nn_img
 
     def noisy_interpolate(self, x1, x2, t_batch, w = 0.5):
         assert x1.shape == x2.shape

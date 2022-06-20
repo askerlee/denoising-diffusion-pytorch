@@ -14,6 +14,7 @@ from tqdm import tqdm
 from pathlib import Path
 import random
 import numpy as np
+import re
 
 # trainer class
 class Trainer(object):
@@ -55,15 +56,15 @@ class Trainer(object):
 
         self.local_rank = local_rank
         self.world_size = world_size
-        self.ds = dataset
+        self.dataset = dataset
         self.debug = debug
         if not self.debug:
             # DistributedSampler does shuffling by default.
-            sampler = DistributedSampler(self.ds)
+            sampler = DistributedSampler(self.dataset)
         else:
             sampler = None
 
-        self.dl = cycle(data.DataLoader(self.ds, batch_size = train_batch_size, sampler = sampler, 
+        self.dl = cycle(data.DataLoader(self.dataset, batch_size = train_batch_size, sampler = sampler, 
                                         pin_memory=True, drop_last=True, num_workers=num_workers),
                         sampler)
         self.opt = Adam(diffusion_model.parameters(), lr=train_lr, weight_decay=weight_decay)
@@ -98,7 +99,7 @@ class Trainer(object):
             'ema':      self.ema_model.state_dict(),
             'scaler':   self.scaler.state_dict()
         }
-        torch.save(data, str(self.results_folder / f'model-{milestone}.pt'))
+        torch.save(data, str(self.results_folder / f'model-{milestone:03}.pt'))
 
     def load(self, milestone, rank=0):
         def convert(param):
@@ -177,9 +178,11 @@ class Trainer(object):
                     self.ema_model.eval()
 
                     milestone = self.step // self.save_and_sample_every
-                    img_save_path = str(self.results_folder / f'sample-{milestone}.png')
+                    img_save_path = f'{self.results_folder}/{milestone:03}-sample.png'
+                    nn_save_path  = f'{self.results_folder}/{milestone:03}-nn.png'                    
                     self.save(milestone)
-                    sample_images(self.ema_model, 36, self.batch_size, img_save_path)               
+                    # self.dataset is provided for nearest neighbor imgae search.
+                    sample_images(self.ema_model, 36, self.batch_size, self.dataset, img_save_path, nn_save_path)               
 
                 self.step += 1
                 pbar.update(1)
@@ -187,6 +190,7 @@ class Trainer(object):
         print0('Training completed')
 
 parser = argparse.ArgumentParser()
+parser.add_argument('--seed', type=int, default=1234, help="Random seed")
 parser.add_argument('--lr', type=float, default=2e-4, help="Learning rate")
 parser.add_argument('--bs', dest='batch_size', type=int, default=32, help="Batch size")
 parser.add_argument('--cp', type=str, dest='cp_path', default=None, help="The path of a model checkpoint")
@@ -264,7 +268,6 @@ if not args.debug:
     torch.distributed.init_process_group(backend="nccl", init_method='env://')
 
 torch.cuda.set_device(args.local_rank)
-args.seed = 1234
 random.seed(args.seed)
 np.random.seed(args.seed)
 torch.manual_seed(args.seed)
@@ -328,7 +331,12 @@ if args.cp_path is not None:
 if args.sample_only:
     assert args.cp_path is not None, "Please specify a checkpoint path to load for sampling"
     cp_trunk = os.path.basename(args.cp_path).split('.')[0]
-    sample_images(diffusion, 36, args.batch_size, str(args.results_folder / f'{cp_trunk}-sample.png'))
+    cp_trunk = re.match(r"model-([0-9]+)", cp_trunk).group(1)
+    milestone = int(cp_trunk)
+    img_save_path = f'{args.results_folder}/{milestone:03}-sample.png'
+    nn_save_path  = f'{args.results_folder}/{milestone:03}-nn.png'
+    # dataset is provided for nearest neighbor imgae search.
+    sample_images(diffusion, 36, args.batch_size, dataset, img_save_path, nn_save_path)
     exit()
 
 trainer = Trainer(
