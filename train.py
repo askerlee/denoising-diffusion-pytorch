@@ -182,7 +182,7 @@ class Trainer(object):
                     nn_save_path  = f'{self.results_folder}/{milestone:03}-nn.png'                    
                     self.save(milestone)
                     # self.dataset is provided for nearest neighbor imgae search.
-                    sample_images(self.ema_model, 36, self.batch_size, self.dataset, img_save_path, nn_save_path)               
+                    sample_images(self.ema_model, 36, 36, self.dataset, img_save_path, nn_save_path)               
 
                 self.step += 1
                 pbar.update(1)
@@ -336,7 +336,7 @@ if args.sample_only:
     img_save_path = f'{args.results_folder}/{milestone:03}-sample.png'
     nn_save_path  = f'{args.results_folder}/{milestone:03}-nn.png'
     # dataset is provided for nearest neighbor imgae search.
-    sample_images(diffusion, 36, args.batch_size, dataset, img_save_path, nn_save_path)
+    sample_images(diffusion, 36, 36, dataset, img_save_path, nn_save_path)
     exit()
 
 trainer = Trainer(

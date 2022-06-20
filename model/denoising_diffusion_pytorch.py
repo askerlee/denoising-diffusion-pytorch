@@ -93,7 +93,8 @@ class ResnetBlock(nn.Module):
         super().__init__()
         self.mlp = nn.Sequential(
             nn.SiLU(),      # Sigmoid Linear Unit, aka swish. https://pytorch.org/docs/stable/_images/SiLU.png
-            nn.Linear(time_emb_dim, dim_out)
+            nn.Linear(time_emb_dim, dim_out),
+            LayerNorm(dim_out)       # Newly added.
         ) if exists(time_emb_dim) else None
 
         # block1 and block2 are ended with a group norm and a SiLU activation.
@@ -244,12 +245,13 @@ class Unet(nn.Module):
         # time embeddings
         # Fixed sinosudal embedding, transformed by two linear layers.
         if with_time_emb:
-            time_dim = dim * 4
+            time_dim = dim * 4              # 256
             self.time_mlp = nn.Sequential(
                 SinusoidalPosEmb(dim),
                 nn.Linear(dim, time_dim),
                 nn.GELU(),
-                nn.Linear(time_dim, time_dim)
+                nn.Linear(time_dim, time_dim),
+                LayerNorm(time_dim),        # Newly added
             )
         else:
             time_dim = None
@@ -265,10 +267,11 @@ class Unet(nn.Module):
 
         if self.cls_embed_type != 'none':
             self.cls_embedding = nn.Embedding(self.num_classes, time_dim)
+            self.cls_embed_ln  = LayerNorm(time_dim)
             print0("cls_embedding: ", list(self.cls_embedding.weight.shape))
         else:
             self.cls_embedding = None
-
+            self.cls_embed_ln = None
         # layers
 
         self.downs = nn.ModuleList([])
@@ -413,6 +416,8 @@ class Unet(nn.Module):
             if exists(classes):
                 assert cls_embed is None
                 cls_embed = self.cls_embedding(classes)
+            
+            cls_embed = self.cls_embed_ln(cls_embed)
             # cls_embed: [batch, 1, 1, time_dim=256].
             cls_embed = cls_embed.view(cls_embed.shape[0], *((1,) * (len(x.shape) - 2)), -1)
             # The teacher always sees the class embedding.
