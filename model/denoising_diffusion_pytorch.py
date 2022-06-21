@@ -556,6 +556,7 @@ class GaussianDiffusion(nn.Module):
         distill_t_frac = 0.,
         cls_embed_type = 'none',
         num_classes = -1,
+        consistency_use_head_feat = True,
         cls_guide_loss_weight = 0.,
         align_tea_stu_feat_weight = 0,
         output_dir = './results',
@@ -589,7 +590,7 @@ class GaussianDiffusion(nn.Module):
         self.interp_loss_weight     = 0
         # Use backbone head features for consistency losses, i.e., with the geometric dimensions collapsed.
         # such as class-guidance loss and interpolation loss (interpolation doesn't work well, though).
-        self.consistency_use_head_feat  = True
+        self.consistency_use_head_feat  = consistency_use_head_feat
         self.cls_guide_loss_weight      = cls_guide_loss_weight
         self.align_tea_stu_feat_weight  = align_tea_stu_feat_weight
         self.output_dir = output_dir

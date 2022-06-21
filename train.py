@@ -237,6 +237,8 @@ parser.add_argument('--clsembed', dest='cls_embed_type', choices=['none', 'tea_s
 parser.add_argument('--wclsguide', dest='cls_guide_loss_weight', default=0.0, type=float, 
                     help='Guide denoising random images with class embedding. '
                     'Default: 0.0, meaning no class guidance loss.')
+parser.add_argument('--consfullfeat', dest='consistency_use_head_feat', action='store_false', 
+                    help='Use the full feature maps when computing consistency losses (e.g., class guidance loss).')
 
 torch.set_printoptions(sci_mode=False)
 args = parser.parse_args()
@@ -311,6 +313,7 @@ diffusion = GaussianDiffusion(
     distill_t_frac = args.distill_t_frac,
     cls_embed_type = args.cls_embed_type,
     num_classes = num_images,
+    consistency_use_head_feat = args.consistency_use_head_feat,
     cls_guide_loss_weight = args.cls_guide_loss_weight,
     align_tea_stu_feat_weight = args.align_tea_stu_feat_weight,
     output_dir = args.results_folder,
