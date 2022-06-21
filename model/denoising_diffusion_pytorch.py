@@ -758,7 +758,7 @@ class GaussianDiffusion(nn.Module):
 
         return img
 
-    def calc_cls_interp_loss(self, img_gt, classes, min_interp_w = 0.2):
+    def calc_cls_interp_loss(self, img_gt, classes, min_interp_w = 0.):
         assert self.cls_embed_type != 'none' and exists(classes)
 
         b, device = img_gt.shape[0], img_gt.device
