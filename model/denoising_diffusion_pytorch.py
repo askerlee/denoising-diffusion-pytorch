@@ -830,7 +830,7 @@ class GaussianDiffusion(nn.Module):
             # Set img_tea to None, so that teacher module won't be executed and trained, 
             # to reduce unnecessary compute.
             img_tea = None
-            
+
         model_output_dict = self.denoise_fn(img_noisy, t, cls_embed=cls_embed, img_tea=img_tea)
         img_stu_pred = model_output_dict['pred_stu']
         img_tea_pred = model_output_dict['pred_tea']
@@ -838,15 +838,22 @@ class GaussianDiffusion(nn.Module):
         if self.objective == 'pred_noise':
             # img_stu_pred is the predicted noises. Subtract it from img_noisy to get the predicted image.
             img_stu_pred = self.predict_start_from_noise(img_noisy, t, img_stu_pred)
-            img_tea_pred = self.predict_start_from_noise(img_noisy, t, img_tea_pred)
+            if train_tea:
+                img_tea_pred = self.predict_start_from_noise(img_noisy, t, img_tea_pred)
         # otherwise, objective is 'pred_x0', and img_stu_pred is already the predicted image.
             
         feat_stu = self.denoise_fn.extract_pre_feat(self.denoise_fn.consistency_feat_ext, img_stu_pred, None, 
                                                      has_grad=True, use_head_feat=self.consistency_use_head_feat)
-        feat_tea = self.denoise_fn.extract_pre_feat(self.denoise_fn.consistency_feat_ext, img_tea_pred, None, 
-                                                     has_grad=True, use_head_feat=self.consistency_use_head_feat)
+        loss_cls_stu = self.loss_fn(feat_stu, feat_gt)
 
-        loss_cls_guide = self.loss_fn(feat_stu, feat_gt) + self.loss_fn(feat_tea, feat_gt)
+        if train_tea:
+            feat_tea = self.denoise_fn.extract_pre_feat(self.denoise_fn.consistency_feat_ext, img_tea_pred, None, 
+                                                        has_grad=True, use_head_feat=self.consistency_use_head_feat)
+            loss_cls_tea = self.loss_fn(feat_tea, feat_gt)
+        else:
+            loss_cls_tea = 0
+
+        loss_cls_guide = loss_cls_stu + loss_cls_tea
         return loss_cls_guide
 
     # inject random noise into x_start. sqrt_one_minus_alphas_cumprod_t is the std of the noise.
