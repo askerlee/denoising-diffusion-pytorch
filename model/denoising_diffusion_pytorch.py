@@ -850,10 +850,12 @@ class GaussianDiffusion(nn.Module):
             feat_tea = self.denoise_fn.extract_pre_feat(self.denoise_fn.consistency_feat_ext, img_tea_pred, None, 
                                                         has_grad=True, use_head_feat=self.consistency_use_head_feat)
             loss_cls_tea = self.loss_fn(feat_tea, feat_gt)
+            DENOM = 2
         else:
             loss_cls_tea = 0
+            DENOM = 1
 
-        loss_cls_guide = loss_cls_stu + loss_cls_tea
+        loss_cls_guide = (loss_cls_stu + loss_cls_tea) / DENOM
         return loss_cls_guide
 
     # inject random noise into x_start. sqrt_one_minus_alphas_cumprod_t is the std of the noise.
