@@ -314,7 +314,7 @@ class Unet(nn.Module):
             # 'resnet34', 'resnet18', 'repvgg_b0'
             self.featnet_type   = self.featnet_type 
             self.featnet_dim    = timm_model2dim[self.featnet_type]
-            self.interp_feat_ext    = timm.create_model(self.featnet_type, pretrained=True)
+            self.consistency_feat_ext    = timm.create_model(self.featnet_type, pretrained=True)
 
             if self.distillation_type != 'none':
                 self.dist_feat_ext_tea  = timm.create_model(self.featnet_type, pretrained=True)
@@ -375,9 +375,9 @@ class Unet(nn.Module):
         )
 
     # extract_pre_feat(): extract features using a pretrained model.
-    # use_cls_feat: use the features that feat_extractor uses to do the final classification. 
+    # use_head_feat: use the features that feat_extractor uses to do the final classification. 
     # It's not relevant to class embeddings used in as part of Unet features.
-    def extract_pre_feat(self, feat_extractor, img, ref_shape, has_grad=True, use_cls_feat=False):
+    def extract_pre_feat(self, feat_extractor, img, ref_shape, has_grad=True, use_head_feat=False):
         if self.featnet_type == 'none':
             return None
 
@@ -387,11 +387,11 @@ class Unet(nn.Module):
             distill_feat = img
         else:
             if has_grad:
-                distill_feat = timm_extract_features(feat_extractor, img, use_cls_feat)
+                distill_feat = timm_extract_features(feat_extractor, img, use_head_feat)
             else:
                 # Wrap the feature extraction with no_grad() to save RAM.
                 with torch.no_grad():
-                    distill_feat = timm_extract_features(feat_extractor, img, use_cls_feat)                
+                    distill_feat = timm_extract_features(feat_extractor, img, use_head_feat)                
 
         if exists(ref_shape):
             # For 128x128 images, vit features are 4x4. Resize to 16x16.
@@ -556,8 +556,7 @@ class GaussianDiffusion(nn.Module):
         distill_t_frac = 0.,
         cls_embed_type = 'none',
         num_classes = -1,
-        interp_loss_weight = 0.,
-        interp_use_cls_feat = True,
+        cls_guide_loss_weight = 0.,
         align_tea_stu_feat_weight = 0,
         output_dir = './results',
         debug = False,
@@ -586,9 +585,13 @@ class GaussianDiffusion(nn.Module):
         if self.num_classes <= 0:
             self.cls_embed_type = 'none'
 
-        self.interp_loss_weight     = interp_loss_weight
-        self.interp_use_cls_feat    = interp_use_cls_feat
-        self.align_tea_stu_feat_weight = align_tea_stu_feat_weight
+        # interpolation loss reduces performance.
+        self.interp_loss_weight     = 0
+        # Use backbone head features for consistency losses, i.e., with the geometric dimensions collapsed.
+        # such as class-guidance loss and interpolation loss (interpolation doesn't work well, though).
+        self.consistency_use_head_feat  = True
+        self.cls_guide_loss_weight      = cls_guide_loss_weight
+        self.align_tea_stu_feat_weight  = align_tea_stu_feat_weight
         self.output_dir = output_dir
         self.debug = debug
         self.num_timesteps      = num_timesteps
@@ -752,15 +755,15 @@ class GaussianDiffusion(nn.Module):
 
         return img
 
-    # x is already added with noises.
+    '''
     def calc_interpolation_loss(self, img_noisy, img_gt, t, classes, min_interp_w = 0.3):
         b = img_noisy.shape[0]
         assert b % 2 == 0
         b2 = b // 2
         x1, x2 = img_noisy[:b2], img_noisy[b2:]
         t2 = t[:b2]
-        feat_gt = self.denoise_fn.extract_pre_feat(self.denoise_fn.interp_feat_ext, img_gt, None, 
-                                                   has_grad=True, use_cls_feat=self.interp_use_cls_feat)        
+        feat_gt = self.denoise_fn.extract_pre_feat(self.denoise_fn.consistency_feat_ext, img_gt, None, 
+                                                   has_grad=True, use_head_feat=self.consistency_use_head_feat)        
         feat_gt1, feat_gt2 = feat_gt[:b2], feat_gt[b2:]
 
         w = torch.rand((b2, ), device=img_noisy.device)
@@ -789,8 +792,8 @@ class GaussianDiffusion(nn.Module):
             pred_interp = self.predict_start_from_noise(img_interp, t2, pred_interp)
         # otherwise, objective is 'pred_x0', and pred_interp is already the predicted image.
             
-        feat_interp = self.denoise_fn.extract_pre_feat(self.denoise_fn.interp_feat_ext, pred_interp, None, 
-                                                       has_grad=True, use_cls_feat=self.interp_use_cls_feat)
+        feat_interp = self.denoise_fn.extract_pre_feat(self.denoise_fn.consistency_feat_ext, pred_interp, None, 
+                                                       has_grad=True, use_head_feat=self.consistency_use_head_feat)
 
         loss_interp1 = self.loss_fn(feat_interp, feat_gt1, reduction='none')
         loss_interp2 = self.loss_fn(feat_interp, feat_gt2, reduction='none')
@@ -804,9 +807,41 @@ class GaussianDiffusion(nn.Module):
         loss_interp = loss_interp.mean()
 
         return loss_interp
+    '''
+
+    def calc_cls_guide_loss(self, img_gt, classes):
+        assert self.cls_embed_type != 'none' and exists(classes)
+
+        b, device = img_gt.shape[0], img_gt.device
+        feat_gt = self.denoise_fn.extract_pre_feat(self.denoise_fn.consistency_feat_ext, img_gt, None, 
+                                                   has_grad=True, use_head_feat=self.consistency_use_head_feat)        
+        # t = torch.randint(0, self.num_timesteps, (b, ), device=device).long()
+        t = torch.full((b, ), self.num_timesteps - 1, device=device, dtype=torch.long)
+        noise = torch.randn_like(img_gt)
+
+        # img_noisy = self.q_sample(x_start=img_gt, t=t, noise=noise)
+        img_noisy = noise   # Pure noise
+        cls_embed = self.denoise_fn.cls_embedding(classes)
+        cls_embed = cls_embed.view(b, *((1,) * (len(img_noisy.shape) - 2)), -1)
+
+        # Setting the last param (img_tea) to None, so that teacher module won't be executed, 
+        # to reduce unnecessary compute.
+        model_output_dict = self.denoise_fn(img_noisy, t, cls_embed=cls_embed)
+        img_pred = model_output_dict['pred_stu']
+
+        if self.objective == 'pred_noise':
+            # img_pred is the predicted noises. Subtract it from img_noisy to get the predicted image.
+            img_pred = self.predict_start_from_noise(img_noisy, t, img_pred)
+        # otherwise, objective is 'pred_x0', and img_pred is already the predicted image.
+            
+        feat_pred = self.denoise_fn.extract_pre_feat(self.denoise_fn.consistency_feat_ext, img_pred, None, 
+                                                     has_grad=True, use_head_feat=self.consistency_use_head_feat)
+
+        loss_cls_guide = self.loss_fn(feat_pred, feat_gt)
+        return loss_cls_guide
 
     # inject random noise into x_start. sqrt_one_minus_alphas_cumprod_t is the std of the noise.
-    def q_sample(self, x_start, t, noise=None, distill_t_frac=-1, step=-1):
+    def q_sample(self, x_start, t, noise=None, distill_t_frac=-1, iter_count=-1):
         assert distill_t_frac <= 1
 
         noise = default(noise, lambda: torch.randn_like(x_start))
@@ -818,9 +853,9 @@ class GaussianDiffusion(nn.Module):
         noise_weight    = torch.sqrt(1 - alphas_cumprod)
         x_noisy1 = x_start_weight * x_start + noise_weight * noise
 
-        if self.debug and step >=0 and step < 10:
-            print0(f'{step} x_start_weight\n{x_start_weight.flatten()}')
-            print0(f'{step} noise_weight\n{noise_weight.flatten()}')
+        if self.debug and iter_count >=0 and iter_count < 10:
+            print0(f'{iter_count} x_start_weight\n{x_start_weight.flatten()}')
+            print0(f'{iter_count} noise_weight\n{noise_weight.flatten()}')
 
         # Conventional sampling. Do not sample for an easier t.
         if distill_t_frac == -1:
@@ -838,9 +873,9 @@ class GaussianDiffusion(nn.Module):
                 noise_weight2   = torch.sqrt(1 - alphas_cumprod2)
                 x_noisy2 = x_start_weight2 * x_start + noise_weight2 * noise
 
-                if self.debug and step >=0 and step < 10:
-                    print0(f'{step} x_start_weight2\n{x_start_weight2.flatten()}')
-                    print0(f'{step} noise_weight2\n{noise_weight2.flatten()}')
+                if self.debug and iter_count >=0 and iter_count < 10:
+                    print0(f'{iter_count} x_start_weight2\n{x_start_weight2.flatten()}')
+                    print0(f'{iter_count} noise_weight2\n{noise_weight2.flatten()}')
 
             return x_noisy1, x_noisy2
 
@@ -869,12 +904,13 @@ class GaussianDiffusion(nn.Module):
             raise ValueError(f'invalid loss type {self.loss_type}')
 
     # x_start: initial image.
-    def p_losses(self, x_start, t, classes, noise = None, step=0):
+    def p_losses(self, x_start, t, classes, noise = None, iter_count=0):
         b, c, h, w = x_start.shape
         # noise: a Gaussian noise for each pixel.
         noise = default(noise, lambda: torch.randn_like(x_start))
 
-        x_noisy = self.q_sample(x_start=x_start, t=t, noise=noise, distill_t_frac=self.distill_t_frac, step=step)
+        x_noisy = self.q_sample(x_start=x_start, t=t, noise=noise, 
+                                distill_t_frac=self.distill_t_frac, iter_count=iter_count)
         # Sample an easier x2 according to a smaller t.
         if self.distill_t_frac == -1:
             x       = x_noisy
@@ -882,10 +918,10 @@ class GaussianDiffusion(nn.Module):
         else:
             x, x_tea = x_noisy
 
-        if self.debug and step < 10:
-            utils.save_image(x, f'{self.output_dir}/{step}-stu.png')
+        if self.debug and iter_count < 10:
+            utils.save_image(x, f'{self.output_dir}/{iter_count}-stu.png')
             if exists(x_tea):
-                utils.save_image(x_tea, f'{self.output_dir}/{step}-tea.png')
+                utils.save_image(x_tea, f'{self.output_dir}/{iter_count}-tea.png')
 
         model_output_dict    = self.denoise_fn(x, t, classes=classes, img_tea=x_tea)
         pred_stu, pred_tea   = model_output_dict['pred_stu'],   model_output_dict['pred_tea']
@@ -917,19 +953,19 @@ class GaussianDiffusion(nn.Module):
             loss_tea = torch.tensor(0, device=x_start.device)
             loss_align_tea_stu = torch.zeros_like(loss_stu)
 
-        if self.interp_loss_weight > 0:
-            loss_interp = self.calc_interpolation_loss(x, x_start, t, classes)
+        if self.cls_guide_loss_weight > 0:
+            loss_cls_guide = self.calc_cls_guide_loss(x_start, classes)
         else:
-            loss_interp = torch.zeros_like(loss_stu)
+            loss_cls_guide = torch.zeros_like(loss_stu)
 
         loss = loss_stu + loss_tea + \
                 self.align_tea_stu_feat_weight * loss_align_tea_stu + \
-                self.interp_loss_weight * loss_interp
+                self.cls_guide_loss_weight * loss_cls_guide
 
         # Capping loss at 1 might helps early iterations when losses are unstable (occasionally very large).
         if loss > 1:
             loss = loss / loss.item()
-        return { 'loss': loss, 'loss_stu': loss_stu, 'loss_tea': loss_tea, 'loss_interp': loss_interp }
+        return { 'loss': loss, 'loss_stu': loss_stu, 'loss_tea': loss_tea, 'loss_cls_guide': loss_cls_guide }
 
     def forward(self, img, classes, *args, **kwargs):
         b, c, h, w, device, img_size, = *img.shape, img.device, self.image_size

@@ -125,8 +125,8 @@ class Trainer(object):
         with tqdm(initial = self.step, total = self.train_num_steps, disable=not is_master) as pbar:
 
             while self.step < self.train_num_steps:
-                # Back up the weight of interp_feat_ext.
-                interp_feat_ext = copy.deepcopy(self.model.denoise_fn.interp_feat_ext)
+                # Back up the weight of consistency_feat_ext.
+                consistency_feat_ext = copy.deepcopy(self.model.denoise_fn.consistency_feat_ext)
 
                 for i in range(self.gradient_accumulate_every):
                     data = next(self.dl)
@@ -134,7 +134,7 @@ class Trainer(object):
                     classes = data['classes'].cuda()
 
                     with autocast(enabled = self.amp):
-                        loss_dict = self.model(img, classes, step=self.step)
+                        loss_dict = self.model(img, classes, iter_count=self.step)
                         # For multiple GPUs, loss is a list.
                         # Since the loss on each GPU is MAE per pixel, we should also average them here,
                         # to make the loss consistent with being on a single GPU.
@@ -153,12 +153,12 @@ class Trainer(object):
                         self.loss_meter.update('loss_tea', loss_tea.item())
                         avg_loss_tea = self.loss_meter.avg['disp']['loss_tea']
                         desc_items.append( f't {loss_tea.item():.3f}/{avg_loss_tea:.3f}' )
-                    if args.interp_loss_weight > 0:
-                        loss_interp = loss_dict['loss_interp'].mean()
-                        loss_interp = reduce_tensor(loss_interp, self.world_size)
-                        self.loss_meter.update('loss_interp', loss_interp.item())
-                        avg_loss_interp = self.loss_meter.avg['disp']['loss_interp']
-                        desc_items.append( f'i {loss_interp.item():.3f}/{avg_loss_interp:.3f}' )
+                    if args.cls_guide_loss_weight > 0:
+                        loss_cls_guide = loss_dict['loss_cls_guide'].mean()
+                        loss_cls_guide = reduce_tensor(loss_cls_guide, self.world_size)
+                        self.loss_meter.update('loss_cls_guide', loss_cls_guide.item())
+                        avg_loss_cls_guide = self.loss_meter.avg['disp']['loss_cls_guide']
+                        desc_items.append( f'c {loss_cls_guide.item():.3f}/{avg_loss_cls_guide:.3f}' )
 
                     desc = ', '.join(desc_items)
                     pbar.set_description(desc)
@@ -166,8 +166,8 @@ class Trainer(object):
                 self.scaler.step(self.opt)
                 self.scaler.update()
                 self.opt.zero_grad()
-                # Restore interp_feat_ext weights to keep it from being updated.
-                self.model.denoise_fn.interp_feat_ext = interp_feat_ext
+                # Restore consistency_feat_ext weights to keep it from being updated.
+                self.model.denoise_fn.consistency_feat_ext = consistency_feat_ext
 
                 if self.step % self.update_ema_every == 0:
                     self.step_ema()
@@ -234,11 +234,9 @@ parser.add_argument('--alignfeat', dest='align_tea_stu_feat_weight', default=0.0
                     'Default: 0.0, meaning no alignment.')
 parser.add_argument('--clsembed', dest='cls_embed_type', choices=['none', 'tea_stu', 'tea_only'], default='none', 
                     help='How class embedding is incorporated in the student and teacher')
-parser.add_argument('--winterp', dest='interp_loss_weight', default=0.0, type=float, 
-                    help='Interpolate random image pairs for better latent space semantics structure. '
-                    'Default: 0.0, meaning no interpolation loss.')
-parser.add_argument('--interpfullfeat', dest='interp_use_cls_feat', action='store_false', 
-                    help='Do not use CLS feat, instead use the full featmaps when computing interpolation loss')                    
+parser.add_argument('--wclsguide', dest='cls_guide_loss_weight', default=0.0, type=float, 
+                    help='Guide denoising random images with class embedding. '
+                    'Default: 0.0, meaning no class guidance loss.')
 
 torch.set_printoptions(sci_mode=False)
 args = parser.parse_args()
@@ -257,12 +255,12 @@ if args.distillation_type == 'tfrac' and args.featnet_type == 'none':
     print0("Distillation type is 'tfrac', but no feature network is specified. ")
     exit(0)
 
-if args.interp_loss_weight > 0:
+if args.cls_guide_loss_weight > 0:
     if args.featnet_type == 'none':
-        print0("Interpolation loss is enabled, but no feature network is specified.")
+        print0("Class guidance loss is enabled, but no feature network is specified.")
         exit(0)
     if args.featnet_type == 'repvgg_b0':
-        print0("repvgg_b0 doesn't work with interpolation loss. Recommended: vit_tiny_patch16_224")
+        print0("repvgg_b0 doesn't work well with class guidance loss. Recommended: vit_tiny_patch16_224")
         exit(0)
 
 if not args.debug:
@@ -313,8 +311,7 @@ diffusion = GaussianDiffusion(
     distill_t_frac = args.distill_t_frac,
     cls_embed_type = args.cls_embed_type,
     num_classes = num_images,
-    interp_loss_weight = args.interp_loss_weight,
-    interp_use_cls_feat = args.interp_use_cls_feat,
+    cls_guide_loss_weight = args.cls_guide_loss_weight,
     align_tea_stu_feat_weight = args.align_tea_stu_feat_weight,
     output_dir = args.results_folder,
     debug = args.debug,
