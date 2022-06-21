@@ -259,12 +259,12 @@ if args.distillation_type == 'tfrac' and args.featnet_type == 'none':
 
 if args.cls_guide_loss_weight > 0:
     if args.featnet_type == 'none':
-        print0("Class guidance loss is enabled, but no feature network is specified.")
+        print0("Class guidance is enabled, but feature network is not specified.")
         exit(0)
     if args.featnet_type == 'repvgg_b0' and args.consistency_use_head_feat:
-        print0("Class guidance loss is enabled. The feature network is 'repvgg_b0' and the consistency loss "
-               "is computed using the collapsed feature maps. This leads to poor performance.")
-        print0("Recommended: use '--featnet vit_tiny_patch16_224', or '--featnet repvgg_b0 --consfullfeat'.")
+        print0("Class guidance is enabled. The feature network is 'repvgg_b0' and the consistency loss "
+               "is computed using the collapsed feature maps. This leads to bad performance.")
+        print0("Recommend: '--featnet vit_tiny_patch16_224', or '--featnet repvgg_b0 --consfullfeat'.")
         exit(0)
 
 if not args.debug:
