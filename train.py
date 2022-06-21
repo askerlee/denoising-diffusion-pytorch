@@ -261,9 +261,11 @@ if args.cls_guide_loss_weight > 0:
     if args.featnet_type == 'none':
         print0("Class guidance loss is enabled, but no feature network is specified.")
         exit(0)
-    if args.featnet_type == 'repvgg_b0':
-        print0("Warn: repvgg_b0 doesn't work well with class guidance loss. Recommended: vit_tiny_patch16_224")
-        print0("Continue anyway.")
+    if args.featnet_type == 'repvgg_b0' and args.consistency_use_head_feat:
+        print0("Class guidance loss is enabled. The feature network is 'repvgg_b0' and the consistency loss "
+               "is computed using the collapsed feature maps. This leads to poor performance.")
+        print0("Recommended: use '--featnet vit_tiny_patch16_224', or '--featnet repvgg_b0 --consfullfeat'.")
+        exit(0)
 
 if not args.debug:
     torch.distributed.init_process_group(backend="nccl", init_method='env://')
