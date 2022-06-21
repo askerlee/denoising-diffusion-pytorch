@@ -826,6 +826,8 @@ class GaussianDiffusion(nn.Module):
 
         # Set img_tea to None, so that teacher module won't be executed and trained, 
         # to reduce unnecessary compute.
+        # Shouldn't train the teacher using class guidance, as the teacher is specialized 
+        # to handle easier (less noisy) images.
         img_tea = None
 
         model_output_dict = self.denoise_fn(img_noisy, t, cls_embed=cls_embed, img_tea=img_tea)
