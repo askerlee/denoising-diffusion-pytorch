@@ -261,10 +261,9 @@ if args.cls_guide_loss_weight > 0:
     if args.featnet_type == 'none':
         print0("Class guidance is enabled, but feature network is not specified.")
         exit(0)
-    if args.featnet_type == 'repvgg_b0' and args.consistency_use_head_feat:
-        print0("Class guidance is enabled. The feature network is 'repvgg_b0' and the consistency loss "
-               "is computed using the collapsed feature maps. This leads to bad performance.")
-        print0("Recommend: '--featnet vit_tiny_patch16_224', or '--featnet repvgg_b0 --consfullfeat'.")
+    if args.featnet_type == 'repvgg_b0':
+        print0("Class guidance is enabled, but the feature network is 'repvgg_b0'. This will lead to bad performance.")
+        print0("Recommend: '--featnet vit_tiny_patch16_224'.")
         exit(0)
 
 if not args.debug:
