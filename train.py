@@ -196,6 +196,8 @@ parser.add_argument('--lr', type=float, default=2e-4, help="Learning rate")
 parser.add_argument('--bs', dest='batch_size', type=int, default=32, help="Batch size")
 parser.add_argument('--cp', type=str, dest='cp_path', default=None, help="The path of a model checkpoint")
 parser.add_argument('--sample', dest='sample_only', action='store_true', help='Do sampling using a trained model')
+parser.add_argument('--geoaug', dest='do_geo_aug', action='store_true', 
+                    help='Do geometric augmentation to training images')
 parser.add_argument('--workers', dest='num_workers', type=int, default=5, 
                     help="Number of workers for data loading. On machines with slower disk IO, this should be higher.")
 parser.add_argument('--debug', action='store_true', help='Debug the diffusion process')
@@ -278,7 +280,7 @@ torch.manual_seed(args.seed)
 torch.cuda.manual_seed_all(args.seed)
 torch.backends.cudnn.benchmark = True
 
-dataset = Dataset(args.ds, image_size=128)
+dataset = Dataset(args.ds, image_size=128, do_geo_aug=args.do_geo_aug)
 num_images = len(dataset)
 num_classes = num_images
 

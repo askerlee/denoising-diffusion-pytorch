@@ -62,7 +62,7 @@ def num_to_groups(num, divisor):
     
 # A simple dataset class.
 class Dataset(data.Dataset):
-    def __init__(self, folder, image_size, exts = ['jpg', 'jpeg', 'png']):
+    def __init__(self, folder, image_size, exts = ['jpg', 'jpeg', 'png'], do_geo_aug=False):
         super().__init__()
         self.folder = folder
         self.image_size = image_size
@@ -82,9 +82,14 @@ class Dataset(data.Dataset):
             ToTensor()
         ])
 
-        affine_prob     = 0.1
-        perspect_prob   = 0.1 
-
+        self.do_geo_aug = do_geo_aug
+        if self.do_geo_aug:
+            affine_prob     = 0.1
+            perspect_prob   = 0.1 
+        else:
+            affine_prob     = 0.0
+            perspect_prob   = 0.0
+            
         tgt_height = tgt_width = image_size
         self.geo_aug_func = iaa.Sequential(
                 [
