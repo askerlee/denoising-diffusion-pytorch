@@ -5,8 +5,8 @@ else
     ROOT=/cygdrive/c/Downloads
 fi
     
-#echo "172.20.74.65"
-#rsync shaohua@172.20.74.65:denoising-diffusion-pytorch/results/'*png' $ROOT/denoising/74.65-clsguide-tea-norm/ -aic  2>&1|grep -E "fcstp|f\\+\\+"
+echo "172.20.74.65"
+rsync shaohua@172.20.74.65:denoising-diffusion-pytorch/results/'*png' $ROOT/denoising/74.65-clsinterp-tea/ -aic  2>&1|grep -E "fcstp|f\\+\\+"
 echo "172.20.117.215"
 rsync shaohua@172.20.117.215:denoising-diffusion-pytorch/results/'*png' $ROOT/denoising/117.215-tea-cls-norm/ -aic 2>&1|grep -E "fcstp|f\\+\\+"
 #echo "10.2.18.238"
