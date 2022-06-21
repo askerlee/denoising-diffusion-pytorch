@@ -260,8 +260,8 @@ if args.cls_guide_loss_weight > 0:
         print0("Class guidance loss is enabled, but no feature network is specified.")
         exit(0)
     if args.featnet_type == 'repvgg_b0':
-        print0("repvgg_b0 doesn't work well with class guidance loss. Recommended: vit_tiny_patch16_224")
-        exit(0)
+        print0("Warn: repvgg_b0 doesn't work well with class guidance loss. Recommended: vit_tiny_patch16_224")
+        print0("Continue anyway.")
 
 if not args.debug:
     torch.distributed.init_process_group(backend="nccl", init_method='env://')
