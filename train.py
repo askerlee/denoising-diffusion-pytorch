@@ -234,9 +234,11 @@ parser.add_argument('--alignfeat', dest='align_tea_stu_feat_weight', default=0.0
                     'Default: 0.0, meaning no alignment.')
 parser.add_argument('--clsembed', dest='cls_embed_type', choices=['none', 'tea_stu', 'tea_only'], default='none', 
                     help='How class embedding is incorporated in the student and teacher')
-parser.add_argument('--wclsguide', dest='cls_guide_loss_weight', default=0.0, type=float, 
-                    help='Guide denoising random images with class embedding. '
-                    'Default: 0.0, meaning no class guidance loss.')
+parser.add_argument('--clsguide', dest='cls_guide_type', choices=['none', 'simple', 'interp'], default='simple', 
+                    help='The type of class guidance: none, simple (one class only), '
+                         'or interp (interpolation between two classes to enforce class embedding linearity)')
+parser.add_argument('--wclsguide', dest='cls_guide_loss_weight', default=0.01, type=float, 
+                    help='Guide denoising random images with class embedding. ')
 parser.add_argument('--consfullfeat', dest='consistency_use_head_feat', action='store_false', 
                     help='Use the full feature maps when computing consistency losses (e.g., class guidance loss).')
 
@@ -263,7 +265,7 @@ if args.cls_guide_loss_weight > 0:
         exit(0)
     if args.featnet_type == 'repvgg_b0':
         print0("Class guidance is enabled, but the feature network is 'repvgg_b0'. This will lead to bad performance.")
-        print0("Recommend: '--featnet vit_tiny_patch16_224'.")
+        print0("Recommended: '--featnet vit_tiny_patch16_224'.")
         exit(0)
 
 if not args.debug:
@@ -315,6 +317,7 @@ diffusion = GaussianDiffusion(
     cls_embed_type = args.cls_embed_type,
     num_classes = num_images,
     consistency_use_head_feat = args.consistency_use_head_feat,
+    cls_guide_type = args.cls_guide_type,
     cls_guide_loss_weight = args.cls_guide_loss_weight,
     align_tea_stu_feat_weight = args.align_tea_stu_feat_weight,
     output_dir = args.results_folder,

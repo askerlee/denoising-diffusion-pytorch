@@ -557,7 +557,8 @@ class GaussianDiffusion(nn.Module):
         cls_embed_type = 'none',
         num_classes = -1,
         consistency_use_head_feat = True,
-        cls_guide_loss_weight = 0.,
+        cls_guide_type = 'none',
+        cls_guide_loss_weight = 0.01,
         align_tea_stu_feat_weight = 0,
         output_dir = './results',
         debug = False,
@@ -591,6 +592,7 @@ class GaussianDiffusion(nn.Module):
         # Use backbone head features for consistency losses, i.e., with the geometric dimensions collapsed.
         # such as class-guidance loss and interpolation loss (interpolation doesn't work well, though).
         self.consistency_use_head_feat  = consistency_use_head_feat
+        self.cls_guide_type             = cls_guide_type
         self.cls_guide_loss_weight      = cls_guide_loss_weight
         self.align_tea_stu_feat_weight  = align_tea_stu_feat_weight
         self.output_dir = output_dir
@@ -756,44 +758,42 @@ class GaussianDiffusion(nn.Module):
 
         return img
 
-    '''
-    def calc_interpolation_loss(self, img_noisy, img_gt, t, classes, min_interp_w = 0.3):
-        b = img_noisy.shape[0]
+    def calc_cls_interp_loss(self, img_gt, classes, min_interp_w = 0.2):
+        assert self.cls_embed_type != 'none' and exists(classes)
+
+        b, device = img_gt.shape[0], img_gt.device
         assert b % 2 == 0
         b2 = b // 2
-        x1, x2 = img_noisy[:b2], img_noisy[b2:]
-        t2 = t[:b2]
-        feat_gt = self.denoise_fn.extract_pre_feat(self.denoise_fn.consistency_feat_ext, img_gt, None, 
+
+        feat_gt = self.denoise_fn.extract_pre_feat(self.denoise_fn.consistency_feat_ext, img_gt, ref_shape=None, 
                                                    has_grad=True, use_head_feat=self.consistency_use_head_feat)        
         feat_gt1, feat_gt2 = feat_gt[:b2], feat_gt[b2:]
 
-        w = torch.rand((b2, ), device=img_noisy.device)
+        w = torch.rand((b2, ), device=img_gt.device)
         # Normalize w into [min_interp_w, 1-min_interp_w], i.e., [0.2, 0.8].
         w = (1 - 2 * min_interp_w) * w + min_interp_w
-        w = w.view(b2, *((1,) * (len(img_noisy.shape) - 1)))
-        img_interp = w * x1 + (1 - w) * x2 
+        w = w.view(b2, *((1,) * (len(img_gt.shape) - 1)))
 
-        # If class embedding is used (either tea only or both tea/stu), 
-        # we interpolate class embedding as well, and pass it to the UNet.
-        if self.cls_embed_type != 'none' and exists(classes):
-            cls_embed = self.denoise_fn.cls_embedding(classes)
-            cls_embed = cls_embed.view(b, *((1,) * (len(img_noisy.shape) - 2)), -1)
-            cls_embed1, cls_embed2 = cls_embed[:b2], cls_embed[b2:]
-            cls_embed_interp = w * cls_embed1 + (1 - w) * cls_embed2
-        else:
-            cls_embed_interp = None
+        t2 = torch.full((b2, ), self.num_timesteps - 1, device=device, dtype=torch.long)
+        noise = torch.randn_like(img_gt[:b2])
+        img_noisy = noise   # Pure noise
+
+        cls_embed = self.denoise_fn.cls_embedding(classes)
+        cls_embed = cls_embed.view(b, *((1,) * (len(img_gt.shape) - 2)), -1)
+        cls_embed1, cls_embed2 = cls_embed[:b2], cls_embed[b2:]
+        cls_embed_interp = w * cls_embed1 + (1 - w) * cls_embed2
 
         # Setting the last param (img_tea) to None, so that teacher module won't be executed, 
         # to reduce unnecessary compute.
-        model_output_dict = self.denoise_fn(img_interp, t2, cls_embed=cls_embed_interp)
-        pred_interp = model_output_dict['pred_stu']
+        model_output_dict = self.denoise_fn(img_noisy, t2, cls_embed=cls_embed_interp)
+        img_stu_pred = model_output_dict['pred_stu']
 
         if self.objective == 'pred_noise':
-            # pred_interp is the predicted noises. Subtract it from img_interp to get the predicted image.
-            pred_interp = self.predict_start_from_noise(img_interp, t2, pred_interp)
+            # img_stu_pred is the predicted noises. Subtract it from img_interp to get the predicted image.
+            img_stu_pred = self.predict_start_from_noise(img_noisy, t2, img_stu_pred)
         # otherwise, objective is 'pred_x0', and pred_interp is already the predicted image.
             
-        feat_interp = self.denoise_fn.extract_pre_feat(self.denoise_fn.consistency_feat_ext, pred_interp, None, 
+        feat_interp = self.denoise_fn.extract_pre_feat(self.denoise_fn.consistency_feat_ext, img_stu_pred, ref_shape=None, 
                                                        has_grad=True, use_head_feat=self.consistency_use_head_feat)
 
         loss_interp1 = self.loss_fn(feat_interp, feat_gt1, reduction='none')
@@ -808,13 +808,12 @@ class GaussianDiffusion(nn.Module):
         loss_interp = loss_interp.mean()
 
         return loss_interp
-    '''
 
     def calc_cls_guide_loss(self, img_gt, classes):
         assert self.cls_embed_type != 'none' and exists(classes)
 
         b, device = img_gt.shape[0], img_gt.device
-        feat_gt = self.denoise_fn.extract_pre_feat(self.denoise_fn.consistency_feat_ext, img_gt, None, 
+        feat_gt = self.denoise_fn.extract_pre_feat(self.denoise_fn.consistency_feat_ext, img_gt, ref_shape=None, 
                                                    has_grad=True, use_head_feat=self.consistency_use_head_feat)        
         # t = torch.randint(0, self.num_timesteps, (b, ), device=device).long()
         t = torch.full((b, ), self.num_timesteps - 1, device=device, dtype=torch.long)
@@ -833,14 +832,13 @@ class GaussianDiffusion(nn.Module):
 
         model_output_dict = self.denoise_fn(img_noisy, t, cls_embed=cls_embed, img_tea=img_tea)
         img_stu_pred = model_output_dict['pred_stu']
-        img_tea_pred = model_output_dict['pred_tea']
 
         if self.objective == 'pred_noise':
             # img_stu_pred is the predicted noises. Subtract it from img_noisy to get the predicted image.
             img_stu_pred = self.predict_start_from_noise(img_noisy, t, img_stu_pred)
         # otherwise, objective is 'pred_x0', and img_stu_pred is already the predicted image.
             
-        feat_stu = self.denoise_fn.extract_pre_feat(self.denoise_fn.consistency_feat_ext, img_stu_pred, None, 
+        feat_stu = self.denoise_fn.extract_pre_feat(self.denoise_fn.consistency_feat_ext, img_stu_pred, ref_shape=None, 
                                                      has_grad=True, use_head_feat=self.consistency_use_head_feat)
 
         loss_cls_guide = self.loss_fn(feat_stu, feat_gt)
@@ -959,8 +957,11 @@ class GaussianDiffusion(nn.Module):
             loss_tea = torch.tensor(0, device=x_start.device)
             loss_align_tea_stu = torch.zeros_like(loss_stu)
 
-        if self.cls_guide_loss_weight > 0:
-            loss_cls_guide = self.calc_cls_guide_loss(x_start, classes)
+        if self.cls_guide_type != 'none':
+            if self.cls_guide_type == 'simple':
+                loss_cls_guide = self.calc_cls_guide_loss(x_start, classes)
+            elif self.cls_guide_type == 'interp':
+                loss_cls_guide = self.calc_cls_interp_loss(x_start, classes)
         else:
             loss_cls_guide = torch.zeros_like(loss_stu)
 
