@@ -809,7 +809,7 @@ class GaussianDiffusion(nn.Module):
         return loss_interp
     '''
 
-    def calc_cls_guide_loss(self, img_gt, classes, train_tea=True):
+    def calc_cls_guide_loss(self, img_gt, classes):
         assert self.cls_embed_type != 'none' and exists(classes)
 
         b, device = img_gt.shape[0], img_gt.device
@@ -824,12 +824,9 @@ class GaussianDiffusion(nn.Module):
         cls_embed = self.denoise_fn.cls_embedding(classes)
         cls_embed = cls_embed.view(b, *((1,) * (len(img_noisy.shape) - 2)), -1)
 
-        if train_tea:
-            img_tea = img_noisy
-        else:
-            # Set img_tea to None, so that teacher module won't be executed and trained, 
-            # to reduce unnecessary compute.
-            img_tea = None
+        # Set img_tea to None, so that teacher module won't be executed and trained, 
+        # to reduce unnecessary compute.
+        img_tea = None
 
         model_output_dict = self.denoise_fn(img_noisy, t, cls_embed=cls_embed, img_tea=img_tea)
         img_stu_pred = model_output_dict['pred_stu']
@@ -838,24 +835,12 @@ class GaussianDiffusion(nn.Module):
         if self.objective == 'pred_noise':
             # img_stu_pred is the predicted noises. Subtract it from img_noisy to get the predicted image.
             img_stu_pred = self.predict_start_from_noise(img_noisy, t, img_stu_pred)
-            if train_tea:
-                img_tea_pred = self.predict_start_from_noise(img_noisy, t, img_tea_pred)
         # otherwise, objective is 'pred_x0', and img_stu_pred is already the predicted image.
             
         feat_stu = self.denoise_fn.extract_pre_feat(self.denoise_fn.consistency_feat_ext, img_stu_pred, None, 
                                                      has_grad=True, use_head_feat=self.consistency_use_head_feat)
-        loss_cls_stu = self.loss_fn(feat_stu, feat_gt)
 
-        if train_tea:
-            feat_tea = self.denoise_fn.extract_pre_feat(self.denoise_fn.consistency_feat_ext, img_tea_pred, None, 
-                                                        has_grad=True, use_head_feat=self.consistency_use_head_feat)
-            loss_cls_tea = self.loss_fn(feat_tea, feat_gt)
-            DENOM = 2
-        else:
-            loss_cls_tea = 0
-            DENOM = 1
-
-        loss_cls_guide = (loss_cls_stu + loss_cls_tea) / DENOM
+        loss_cls_guide = self.loss_fn(feat_stu, feat_gt)
         return loss_cls_guide
 
     # inject random noise into x_start. sqrt_one_minus_alphas_cumprod_t is the std of the noise.
