@@ -62,7 +62,7 @@ def num_to_groups(num, divisor):
     
 # A simple dataset class.
 class Dataset(data.Dataset):
-    def __init__(self, folder, image_size, exts = ['jpg', 'jpeg', 'png'], do_geo_aug=False):
+    def __init__(self, folder, image_size, exts = ['jpg', 'jpeg', 'png'], do_geo_aug=True):
         super().__init__()
         self.folder = folder
         self.image_size = image_size
