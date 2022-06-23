@@ -191,7 +191,9 @@ class Trainer(object):
         print0('Training completed')
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--seed', type=int, default=1234, help="Random seed")
+parser.add_argument('--seed', type=int, default=1234, help="Random seed for initialization and training")
+parser.add_argument('--sampleseed', type=int, default=5678, help="Random seed for sampling")
+
 parser.add_argument('--lr', type=float, default=2e-4, help="Learning rate")
 parser.add_argument('--bs', dest='batch_size', type=int, default=32, help="Batch size")
 parser.add_argument('--cp', type=str, dest='cp_path', default=None, help="The path of a model checkpoint")
@@ -324,6 +326,7 @@ diffusion = GaussianDiffusion(
     align_tea_stu_feat_weight = args.align_tea_stu_feat_weight,
     output_dir = args.results_folder,
     debug = args.debug,
+    sampleseed = args.sampleseed,
 )
 
 diffusion.cuda()

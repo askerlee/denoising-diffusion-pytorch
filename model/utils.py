@@ -178,10 +178,21 @@ class DistributedDataParallelPassthrough(torch.nn.parallel.DistributedDataParall
 
 def sample_images(model, num_images, batch_size, dataset, img_save_path, nn_save_path):
     batches = num_to_groups(num_images, batch_size)
+
+    old_rng_state = torch.random.get_rng_state()
+    # Sampling uses independent noises and random seeds from training.
+    torch.random.set_rng_state(model.sample_rng_state)
+    
     # In all_images_list, each element is a batch of images.
     # In all_nn_list, if dataset is provided, each element is a batch of nearest neighbor images. 
     # Otherwise, all_nn_list is a list of None.
     all_images_nn_list = list(map(lambda n: model.sample(batch_size=n, dataset=dataset), batches))
+
+    # Update sample_rng_state.
+    model.sample_rng_state = torch.random.get_rng_state()
+    # Restore the training random state.
+    torch.random.set_rng_state(old_rng_state)
+
     all_images_list, all_nn_list = zip(*all_images_nn_list)
     all_images      = torch.cat(all_images_list, dim=0)
     utils.save_image(all_images,    img_save_path, nrow = 6)

@@ -562,6 +562,7 @@ class GaussianDiffusion(nn.Module):
         align_tea_stu_feat_weight = 0,
         output_dir = './results',
         debug = False,
+        sampleseed = 5678,
     ):
         super().__init__()
         if isinstance(denoise_fn, torch.nn.DataParallel):
@@ -599,7 +600,13 @@ class GaussianDiffusion(nn.Module):
         self.debug = debug
         self.num_timesteps      = num_timesteps
         self.alpha_beta_schedule = alpha_beta_schedule
-        
+
+        # Sampling uses independent noises and random seeds from training.
+        old_rng_state = torch.get_rng_state()
+        torch.manual_seed(sampleseed)
+        self.sample_rng_state = torch.get_rng_state()
+        torch.set_rng_state(old_rng_state)
+
         if self.alpha_beta_schedule == 'cosb':
             print0("Use cosine_beta_schedule")
             betas = cosine_beta_schedule(self.num_timesteps)
