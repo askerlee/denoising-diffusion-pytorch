@@ -842,9 +842,7 @@ class GaussianDiffusion(nn.Module):
         # to reduce unnecessary compute.
         # Shouldn't train the teacher using class guidance, as the teacher is specialized 
         # to handle easier (less noisy) images.
-        img_tea = None
-
-        model_output_dict = self.denoise_fn(img_noisy, t, cls_embed=cls_embed, img_tea=img_tea)
+        model_output_dict = self.denoise_fn(img_noisy, t, cls_embed=cls_embed, img_tea=None)
         img_stu_pred = model_output_dict['pred_stu']
 
         if self.objective == 'pred_noise':
