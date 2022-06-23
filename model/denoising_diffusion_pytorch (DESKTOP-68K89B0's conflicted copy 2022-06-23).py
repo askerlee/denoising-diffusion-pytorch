@@ -562,7 +562,6 @@ class GaussianDiffusion(nn.Module):
         align_tea_stu_feat_weight = 0,
         output_dir = './results',
         debug = False,
-        sampleseed = 5678,
     ):
         super().__init__()
         if isinstance(denoise_fn, torch.nn.DataParallel):
@@ -600,13 +599,7 @@ class GaussianDiffusion(nn.Module):
         self.debug = debug
         self.num_timesteps      = num_timesteps
         self.alpha_beta_schedule = alpha_beta_schedule
-
-        # Sampling uses independent noises and random seeds from training.
-        old_rng_state = torch.get_rng_state()
-        torch.manual_seed(sampleseed)
-        self.sample_rng_state = torch.get_rng_state()
-        torch.set_rng_state(old_rng_state)
-
+        
         if self.alpha_beta_schedule == 'cosb':
             print0("Use cosine_beta_schedule")
             betas = cosine_beta_schedule(self.num_timesteps)
@@ -765,7 +758,7 @@ class GaussianDiffusion(nn.Module):
 
         return img
 
-    def calc_cls_interp_loss(self, img_gt, classes, min_interp_w = 0., min_before_weight=False):
+    def calc_cls_interp_loss(self, img_gt, classes, min_interp_w = 0.):
         assert self.cls_embed_type != 'none' and exists(classes)
 
         b, device = img_gt.shape[0], img_gt.device
@@ -779,7 +772,6 @@ class GaussianDiffusion(nn.Module):
         w = torch.rand((b2, ), device=img_gt.device)
         # Normalize w into [min_interp_w, 1-min_interp_w], i.e., [0.2, 0.8].
         w = (1 - 2 * min_interp_w) * w + min_interp_w
-        # w.shape: (b2, 1, 1, 1)
         w = w.view(b2, *((1,) * (len(img_gt.shape) - 1)))
 
         t2 = torch.full((b2, ), self.num_timesteps - 1, device=device, dtype=torch.long)
@@ -806,20 +798,14 @@ class GaussianDiffusion(nn.Module):
 
         loss_interp1 = self.loss_fn(feat_interp, feat_gt1, reduction='none')
         loss_interp2 = self.loss_fn(feat_interp, feat_gt2, reduction='none')
-
-        if min_before_weight:
-            # if neighbor_mask[i, pos] = 1, i.e., this pixel's feature is more similar to sub-batch1, 
-            # then use loss weight w. Otherwise, it's more similar to sub-batch2, use loss weight 1-w.
-            neighbor_mask = (loss_interp1 < loss_interp2).float()
-            loss_weight = neighbor_mask * w + (1 - neighbor_mask) * (1 - w)
-            # The more similar features from tea_feat of either sub-batch1 or sub-batch2 are selected 
-            # to compute the loss with feat_interp at each pixel.
-            loss_interp = torch.minimum(loss_interp1, loss_interp2) * loss_weight
-            loss_interp = loss_interp.mean()
-        else:
-            loss_interp1_weighted = loss_interp1 * w
-            loss_interp2_weighted = loss_interp2 * (1 - w)
-            loss_interp = torch.minimum(loss_interp1_weighted, loss_interp2_weighted).mean()
+        # if neighbor_mask[i, pos] = 1, i.e., this pixel's feature is more similar to sub-batch1, 
+        # then use loss weight w. Otherwise, it's more similar to sub-batch2, use loss weight 1-w.
+        neighbor_mask = (loss_interp1 < loss_interp2).float()
+        loss_weight = neighbor_mask * w + (1 - neighbor_mask) * (1 - w)
+        # The more similar features from tea_feat of either sub-batch1 or sub-batch2 are selected 
+        # to compute the loss with feat_interp at each pixel.
+        loss_interp = torch.minimum(loss_interp1, loss_interp2) * loss_weight
+        loss_interp = loss_interp.mean()
 
         return loss_interp
 
@@ -842,9 +828,7 @@ class GaussianDiffusion(nn.Module):
         # to reduce unnecessary compute.
         # Shouldn't train the teacher using class guidance, as the teacher is specialized 
         # to handle easier (less noisy) images.
-        img_tea = None
-
-        model_output_dict = self.denoise_fn(img_noisy, t, cls_embed=cls_embed, img_tea=img_tea)
+        model_output_dict = self.denoise_fn(img_noisy, t, cls_embed=cls_embed, img_tea=None)
         img_stu_pred = model_output_dict['pred_stu']
 
         if self.objective == 'pred_noise':
