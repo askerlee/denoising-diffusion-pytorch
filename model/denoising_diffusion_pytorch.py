@@ -819,7 +819,9 @@ class GaussianDiffusion(nn.Module):
         else:
             loss_interp1_weighted = loss_interp1 * w
             loss_interp2_weighted = loss_interp2 * (1 - w)
-            loss_interp = torch.minimum(loss_interp1_weighted, loss_interp2_weighted).mean()
+            neighbor_mask = (loss_interp1_weighted < loss_interp2_weighted).float()
+            loss_interp = neighbor_mask * loss_interp1 + (1 - neighbor_mask) * loss_interp2
+            loss_interp = loss_interp.mean()
 
         return loss_interp
 
