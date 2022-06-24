@@ -1,4 +1,5 @@
-from model import Unet, GaussianDiffusion, EMA, Dataset, cycle, DistributedDataParallelPassthrough, \
+from model import Unet, GaussianDiffusion, EMA, SimpleDataset, Imagenet, \
+                  cycle, DistributedDataParallelPassthrough, \
                   sample_images, AverageMeters, print0, reduce_tensor
 import argparse
 import torch
@@ -131,7 +132,7 @@ class Trainer(object):
                 for i in range(self.gradient_accumulate_every):
                     data = next(self.dl)
                     img     = data['img'].cuda()
-                    classes = data['classes'].cuda()
+                    classes = data['cls'].cuda()
 
                     with autocast(enabled = self.amp):
                         loss_dict = self.model(img, classes, iter_count=self.step)
@@ -282,9 +283,12 @@ torch.manual_seed(args.seed)
 torch.cuda.manual_seed_all(args.seed)
 torch.backends.cudnn.benchmark = True
 
-dataset = Dataset(args.ds, image_size=128, do_geo_aug=args.do_geo_aug)
-num_images = len(dataset)
-num_classes = num_images
+if args.ds == 'imagenet':
+    dataset = Imagenet(args.ds, image_size=128, split='train', do_geo_aug=args.do_geo_aug)
+else:
+    dataset = SimpleDataset(args.ds, image_size=128, do_geo_aug=args.do_geo_aug)
+
+num_classes = dataset.get_num_classes()
 
 print0(f"world size: {args.world_size}, batch size per GPU: {args.batch_size}, seed: {args.seed}")
 
@@ -293,7 +297,7 @@ unet = Unet(
     dim_mults = (1, 2, 4, 8),
     # with_time_emb = True, do time embedding.
     memory_size = args.memory_size,
-    num_classes = num_images,
+    num_classes = num_classes,
     # if do distillation and featnet_type=='mini', use a miniature of original images as privileged information to train the teacher model.
     # if do distillation and featnet_type=='resnet34' or another model name, 
     # use image features extracted with a pretrained model to train the teacher model.
@@ -319,7 +323,7 @@ diffusion = GaussianDiffusion(
     distillation_type = args.distillation_type,
     distill_t_frac = args.distill_t_frac,
     cls_embed_type = args.cls_embed_type,
-    num_classes = num_images,
+    num_classes = num_classes,
     consistency_use_head_feat = args.consistency_use_head_feat,
     cls_guide_type = args.cls_guide_type,
     cls_guide_loss_weight = args.cls_guide_loss_weight,

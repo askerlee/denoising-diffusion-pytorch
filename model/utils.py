@@ -13,6 +13,8 @@ from .laplacian import LapLoss
 import imgaug.augmenters as iaa
 from torchvision.transforms import ColorJitter, ToTensor, ToPILImage, Resize
 from inspect import isfunction
+import glob
+from itertools import chain
 
 # Only print on GPU0. Avoid duplicate messages.
 def print0(*print_args, **kwargs):
@@ -61,20 +63,16 @@ def num_to_groups(num, divisor):
     return arr
     
 # A simple dataset class.
-class Dataset(data.Dataset):
-    def __init__(self, folder, image_size, exts = ['jpg', 'jpeg', 'png'], do_geo_aug=True):
+class BaseDataset(data.Dataset):
+    def __init__(self, root, image_size, exts = ['jpg', 'jpeg', 'png', 'JPEG', 'JPG'], 
+                 do_geo_aug=True, training=True):
         super().__init__()
-        self.folder = folder
+        self.root = root
         self.image_size = image_size
-        self.paths = [p for ext in exts for p in Path(f'{folder}').glob(f'**/*.{ext}')]
-        # Each class maps to a list of image indices. Since for simple datasets like pokemon,
-        # each class is one image, so each list of indices just maps to 
-        # one element: the class index itself (but note it's in a list).
-        # For other datasets like Imagenet, each cls2indices entry should contain more images.
-        self.cls2indices = [ [i] for i in range(len(self.paths)) ]
-        
-        print0("Found {} images in {}".format(len(self.paths), folder))
-        self.training = True
+        self.training = training
+        self.paths = []
+        self.cls2indices = []
+        self.index2cls = []
 
         self.test_transform = transforms.Compose([
             ToPILImage(),
@@ -151,9 +149,135 @@ class Dataset(data.Dataset):
         else:
             img_aug = self.test_transform(img)
 
+        cls = self.index2cls[index]
         # For small datasets such as pokemon, use index as the image classes.
-        return { 'img': img_aug, 'classes': index }
+        return { 'img': img_aug, 'cls': cls }
 
+    def get_num_classes(self):
+        return len(self.cls2indices)
+
+    def sample_by_labels(self, label_list):
+        '''
+        Sample images that are of the classes as in label_list.
+        args:
+            label_list: list[int]. For imagenet, 0 ~ 999.
+        return: 
+            images: a dict that contains a list of images and a corresponding list of classes.
+        '''
+        images = { 'img': [], 'cls': [] }
+        for i in label_list:
+            num_image = len(self.cls2indices[i])
+            idx = np.random.randint(num_image)
+            img_idx = self.cls2indices[i][idx]
+            image = self.__getitem__(img_idx)
+            images['img'].append(image['img'])
+            images['cls'].append(image['cls'])
+        return images
+
+def aspect_preserving_resize(image, min_size=128):
+    """
+    Resize image with perserved aspect and limited min size.
+    args:
+        image: np.array(H, W, C) or np.array(H, W)
+    """
+    height, width = image.shape[:2]
+    scale = min(height / min_size, width / min_size)
+    new_height, new_width = int(height / scale), int(width / scale)
+    assert new_height >= min_size and new_width >= min_size
+    
+    img = Image.fromarray(image)
+    resized_image = img.resize((new_width, new_height))
+    return np.array(resized_image)
+
+class SimpleDataset(BaseDataset):
+    def __init__(self, root, image_size, exts = ['jpg', 'jpeg', 'png', 'JPEG', 'JPG'], 
+                 do_geo_aug=True, training=True):
+        super(BaseDataset, self).__init__(root, image_size, exts, do_geo_aug, training)
+
+        self.paths = [ p for ext in exts for p in Path(f'{root}').glob(f'**/*.{ext}') ]
+        # Each class maps to a list of image indices. Since for simple datasets like pokemon,
+        # each class is one image, so each list of indices just maps to 
+        # one element: the class index itself (but note it's in a list).
+        # For other datasets like Imagenet, each cls2indices entry should contain more images.
+        self.cls2indices = [ [i] for i in range(len(self.paths)) ]
+        # index2cls: one-to-one mapping.
+        self.index2cls   = [ i for i in range(len(self.paths)) ]
+        print0("Found {} images in {}".format(len(self.paths), root))
+
+class Imagenet(BaseDataset):
+    def __init__(self, root='imagenet128', image_size=128, split = 'train', \
+        exts = ['jpg', 'jpeg', 'png', 'JPEG', 'JPG'], do_geo_aug=True, training=True):
+        super(BaseDataset, self).__init__(root, image_size, exts, do_geo_aug, training)
+
+        self.root = root
+        self.split = split
+        self.map_file = os.path.join(self.root, 'map_clsloc.txt')
+        assert os.path.exists(self.map_file), f'Lable mapping file not found at {self.map_file}!'
+        self.folder_names, self.folder2label = self.get_folder_label_mapping()
+        # folder_list is a list of lists. Each sub-list is images in a folder (class).
+        if self.split == 'test':
+            self.folder_list = [ [ p for ext in exts \
+                for p in glob.glob(os.path.join(self.root, self.split) + f'/*.{ext}') ] ]
+        else: # 'train', 'val'
+            self.folder_list = [ [ p for ext in exts \
+                # for p in Path(f'{os.path.join(self.root, self.split, fn)}').glob(f'**/*.{ext}')]\
+                for p in glob.glob(os.path.join(self.root, self.split, folder_name) + f'/*.{ext}') ] \
+                for folder_name in self.folder_names ]
+
+        self.paths = list(chain.from_iterable(self.folder_list))
+        img_indices = list(range(len(self.paths)))
+        self.cls2indices = []
+        self.index2cls   = []
+        start_idx = 0
+
+        for cls, img_list in enumerate(self.folder_list):
+            end_idx = start_idx + len(img_list)
+            self.cls2indices.append(img_indices[start_idx:end_idx])
+            self.index2cls += [cls] * len(img_list)
+            start_idx = end_idx
+
+        print0("Found {} images in {}".format(len(self.paths), root))
+
+    # Get list of folders with order as in map_file
+    # Useful when we want to have the same splits (taking every n-th class)
+    # Returns dictionary where key is folder name and value is label num as int
+    # n02119789: 0
+    # n02100735: 1
+    # n02110185: 2
+    # ...
+    def get_folder_label_mapping(self):
+        folders = []
+        folder2label = {}
+        with open(self.map_file) as f:
+            for line in f:
+                tok = line.split()
+                folders.append(tok[0])
+                folder2label[tok[0]] = int(tok[1]) - 1
+        return folders, folder2label
+
+    '''
+    def resize_dataset(self, new_folder):
+        """
+        create a resized dataset "imagenet128" and keep data folder structure.
+        """
+        for i in range(len(self.folder_list)):
+            for j in range(len(self.folder_list[i])):
+                old_path = self.folder_list[i][j]
+                dirs = old_path.split('/')
+                if self.split == 'test':
+                    new_path = os.path.join(new_folder, dirs[1])
+                else:
+                    new_path = os.path.join(new_folder, dirs[1], dirs[2])
+                if not os.path.exists(new_path):
+                    os.makedirs(new_path)
+                img = np.array(Image.open(old_path))
+                img = aspect_preserving_resize(img, min_size=self.image_size)
+                img = Image.fromarray(img)
+                if img.mode == "RGBA":
+                    img = img.convert("RGB")
+                img.save(os.path.join(new_path, dirs[-1]))
+    '''
+    
 class EMA():
     def __init__(self, beta):
         super().__init__()
