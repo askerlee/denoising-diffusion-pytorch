@@ -62,11 +62,14 @@ class Trainer(object):
         if not self.debug:
             # DistributedSampler does shuffling by default.
             sampler = DistributedSampler(self.dataset)
+            shuffle = False
         else:
             sampler = None
+            shuffle = True
 
         self.dl = cycle(data.DataLoader(self.dataset, batch_size = train_batch_size, sampler = sampler, 
-                                        pin_memory=True, drop_last=True, num_workers=num_workers),
+                                        shuffle = shuffle, pin_memory = True, 
+                                        drop_last = True, num_workers = num_workers),
                         sampler)
         self.opt = Adam(diffusion_model.parameters(), lr=train_lr, weight_decay=weight_decay)
 
