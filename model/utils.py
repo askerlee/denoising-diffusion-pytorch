@@ -150,7 +150,7 @@ class BaseDataset(data.Dataset):
             img_aug = self.test_transform(img)
 
         cls = self.index2cls[index]
-        print(img_aug.shape, path)
+        # print(img_aug.shape, path)
         # For small datasets such as pokemon, use index as the image classes.
         return { 'img': img_aug, 'cls': cls }
 
