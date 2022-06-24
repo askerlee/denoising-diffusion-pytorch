@@ -76,7 +76,7 @@ class BaseDataset(data.Dataset):
 
         self.test_transform = transforms.Compose([
             ToPILImage(),
-            Resize(image_size),
+            Resize((image_size, image_size)),
             ToTensor()
         ])
 
