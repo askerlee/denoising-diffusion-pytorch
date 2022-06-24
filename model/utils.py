@@ -192,7 +192,7 @@ def aspect_preserving_resize(image, min_size=128):
 class SimpleDataset(BaseDataset):
     def __init__(self, root, image_size, exts = ['jpg', 'jpeg', 'png', 'JPEG', 'JPG'], 
                  do_geo_aug=True, training=True):
-        super(BaseDataset, self).__init__(root, image_size, exts, do_geo_aug, training)
+        super(SimpleDataset, self).__init__(root, image_size, exts, do_geo_aug, training)
 
         self.paths = [ p for ext in exts for p in Path(f'{root}').glob(f'**/*.{ext}') ]
         # Each class maps to a list of image indices. Since for simple datasets like pokemon,
@@ -207,7 +207,7 @@ class SimpleDataset(BaseDataset):
 class Imagenet(BaseDataset):
     def __init__(self, root='imagenet128', image_size=128, split = 'train', \
         exts = ['jpg', 'jpeg', 'png', 'JPEG', 'JPG'], do_geo_aug=True, training=True):
-        super(BaseDataset, self).__init__(root, image_size, exts, do_geo_aug, training)
+        super(Imagenet, self).__init__(root, image_size, exts, do_geo_aug, training)
 
         self.root = root
         self.split = split
