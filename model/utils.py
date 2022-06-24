@@ -141,7 +141,7 @@ class BaseDataset(data.Dataset):
 
     def __getitem__(self, index):
         path = self.paths[index]
-        img = np.array(Image.open(path))
+        img = np.array(Image.open(path).convert('RGB'))
 
         if self.training:
             img_aug = self.geo_aug_func.augment_image(np.array(img)).copy()
@@ -150,6 +150,7 @@ class BaseDataset(data.Dataset):
             img_aug = self.test_transform(img)
 
         cls = self.index2cls[index]
+        print(img_aug.shape, path)
         # For small datasets such as pokemon, use index as the image classes.
         return { 'img': img_aug, 'cls': cls }
 
