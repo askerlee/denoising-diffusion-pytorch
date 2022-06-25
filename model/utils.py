@@ -196,7 +196,7 @@ class SimpleDataset(BaseDataset):
                  do_geo_aug=True, training=True):
         super(SimpleDataset, self).__init__(root, image_size, exts, do_geo_aug, training)
 
-        self.paths = [ p for ext in exts for p in Path(f'{root}').glob(f'**/*.{ext}') ]
+        self.paths = [ p for ext in exts for p in sorted(Path(f'{root}').glob(f'**/*.{ext}')) ]
         # Each class maps to a list of image indices. Since for simple datasets like pokemon,
         # each class is one image, so each list of indices just maps to 
         # one element: the class index itself (but note it's in a list).
@@ -219,11 +219,11 @@ class Imagenet(BaseDataset):
         # folder_list is a list of lists. Each sub-list is images in a folder (class).
         if self.split == 'test':
             self.folder_list = [ [ p for ext in exts \
-                for p in glob.glob(os.path.join(self.root, self.split) + f'/*.{ext}') ] ]
+                for p in sorted(glob.glob(os.path.join(self.root, self.split) + f'/*.{ext}')) ] ]
         else: # 'train', 'val'
             self.folder_list = [ [ p for ext in exts \
                 # for p in Path(f'{os.path.join(self.root, self.split, fn)}').glob(f'**/*.{ext}')]\
-                for p in glob.glob(os.path.join(self.root, self.split, folder_name) + f'/*.{ext}') ] \
+                for p in sorted(glob.glob(os.path.join(self.root, self.split, folder_name) + f'/*.{ext}')) ] \
                 for folder_name in self.folder_names ]
 
         self.paths = list(chain.from_iterable(self.folder_list))
