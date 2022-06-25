@@ -259,11 +259,11 @@ class Imagenet(BaseDataset):
     def save_example(self, output_dir):
         if not os.path.exists(output_dir):
             os.makedirs(output_dir, exist_ok=True)
-            
+
         for cls, indices in enumerate(self.cls2indices):
             img_index = indices[0]
             img = self.__getitem__(img_index)
-            label = self.cls2label(cls)
+            label = self.cls2label[cls]
             img_path = os.path.join(output_dir, f'{cls}-{label}.jpg')
             utils.save_image(img, img_path)
 
