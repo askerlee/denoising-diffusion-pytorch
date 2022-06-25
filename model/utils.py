@@ -262,10 +262,10 @@ class Imagenet(BaseDataset):
 
         for cls, indices in enumerate(self.cls2indices):
             img_index = indices[0]
-            img = self.__getitem__(img_index)
+            img_dict = self.__getitem__(img_index)
             label = self.cls2label[cls]
             img_path = os.path.join(output_dir, f'{cls}-{label}.jpg')
-            utils.save_image(img, img_path)
+            utils.save_image(img_dict['img'], img_path)
 
     '''
     def resize_dataset(self, new_folder):
