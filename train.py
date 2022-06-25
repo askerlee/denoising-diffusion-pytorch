@@ -288,7 +288,8 @@ torch.backends.cudnn.benchmark = True
 
 if args.ds == 'imagenet':
     dataset = Imagenet(args.ds, image_size=128, split='train', do_geo_aug=args.do_geo_aug)
-    dataset.save_example("imagenet128-examples")
+    #dataset.save_example("imagenet128-examples")
+    #exit(0)
 else:
     dataset = SimpleDataset(args.ds, image_size=128, do_geo_aug=args.do_geo_aug)
 

@@ -267,6 +267,8 @@ class Imagenet(BaseDataset):
             img_path = os.path.join(output_dir, f'{cls}-{label}.jpg')
             utils.save_image(img_dict['img'], img_path)
 
+        print('{cls+1} example images saved to {}'.format(output_dir))
+
     '''
     def resize_dataset(self, new_folder):
         """
