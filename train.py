@@ -222,7 +222,7 @@ parser.add_argument('--sched', dest='alpha_beta_schedule', type=str, choices=['c
 parser.add_argument('--losstype', dest='loss_type', type=str, choices=['l1', 'l2', 'lap'], default='l1', 
                     help="Type of image denoising loss")
 parser.add_argument('--consistlosstype', dest='consist_loss_type', type=str, 
-                    choices=['l1', 'cosine'], default='cosine', 
+                    choices=['l1', 'cosine'], default='l1', 
                     help="Type of image feature consistency loss")
 parser.add_argument('--obj', dest='objective_type', type=str, choices=['pred_noise', 'pred_x0'], default='pred_noise', 
                     help="Type of denoising objective")
