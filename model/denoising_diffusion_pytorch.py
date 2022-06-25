@@ -931,7 +931,7 @@ class GaussianDiffusion(nn.Module):
         if self.consist_loss_type == 'l1':
             return F.l1_loss
         elif self.consist_loss_type == 'cosine':
-            return F.cosine_similarity
+            return F.cosine_embedding_loss
         else:
             raise ValueError(f'invalid consistency loss type {self.consist_loss_type}')
 
