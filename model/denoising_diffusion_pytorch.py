@@ -925,13 +925,13 @@ class GaussianDiffusion(nn.Module):
         else:
             raise ValueError(f'invalid loss type {self.loss_type}')
 
-    # return the consistency loss function
-    @property
-    def consist_loss_fn(self):
+    # compute the consistency loss. consist_loss_fn is a function, instead of property as loss_fn.
+    def consist_loss_fn(self, feat_pred, feat_gt, reduction='mean'):
         if self.consist_loss_type == 'l1':
-            return F.l1_loss
+            return F.l1_loss(feat_pred, feat_gt, reduction=reduction)
         elif self.consist_loss_type == 'cosine':
-            return F.cosine_embedding_loss
+            target = torch.ones(feat_gt.shape[0], device=feat_gt.device)
+            return F.cosine_embedding_loss(feat_pred, feat_gt, target, reduction=reduction)
         else:
             raise ValueError(f'invalid consistency loss type {self.consist_loss_type}')
 
