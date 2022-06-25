@@ -767,7 +767,7 @@ class GaussianDiffusion(nn.Module):
 
         return img
 
-    def calc_cls_interp_loss(self, img_gt, classes, min_interp_w = 0., min_before_weight=False):
+    def calc_cls_interp_loss(self, img_gt, classes, min_interp_w = 0., min_before_weight=True):
         assert self.cls_embed_type != 'none' and exists(classes)
 
         b, device = img_gt.shape[0], img_gt.device
@@ -823,7 +823,7 @@ class GaussianDiffusion(nn.Module):
             loss_interp2_weighted = loss_interp2 * (1 - w)
             neighbor_mask = (loss_interp1_weighted < loss_interp2_weighted).float()
             sel_weight = neighbor_mask * w + (1 - neighbor_mask) * (1 - w)
-            total_weight = sel_weight.sum()
+            total_weight = sel_weight.sum() + 1e-6
             loss_interp = torch.minimum(loss_interp1_weighted, loss_interp2_weighted)
             loss_interp = loss_interp.sum() / total_weight
 
