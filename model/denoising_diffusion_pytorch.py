@@ -931,8 +931,8 @@ class GaussianDiffusion(nn.Module):
             return F.l1_loss(feat_pred, feat_gt, reduction=reduction)
         elif self.consist_loss_type == 'cosine':
             # Assume feat_pred and feat_gt are of [B, C, 1, 1].
-            feat_pred   = feat_pred.squeeze()
-            feat_gt     = feat_gt.squeeze()
+            feat_pred   = feat_pred.squeeze(3).squeeze(2)
+            feat_gt     = feat_gt.squeeze(3).squeeze(2)
             target      = torch.ones(feat_gt.shape[0], device=feat_gt.device)
             return F.cosine_embedding_loss(feat_pred, feat_gt, target, reduction=reduction)
         else:
