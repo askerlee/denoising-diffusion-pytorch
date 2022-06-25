@@ -9,6 +9,7 @@ from PIL import Image
 import os
 import numpy as np
 import timm
+from timm.data.constants import IMAGENET_DEFAULT_STD, IMAGENET_DEFAULT_MEAN
 from .laplacian import LapLoss
 import imgaug.augmenters as iaa
 from torchvision.transforms import ColorJitter, ToTensor, ToPILImage, Resize
@@ -348,6 +349,11 @@ def sample_images(model, num_images, batch_size, dataset, img_save_path, nn_save
 # For ViTs, patch the original timm code to keep the spatial dimensions of the extracted image features.
 # use_head_feat: collapse geometric dimensions of the features.
 def timm_extract_features(model, x, use_head_feat=False):
+    img_mean = torch.tensor(IMAGENET_DEFAULT_STD, device=x.device).view(1, 3, 1, 1)
+    img_std  = torch.tensor(IMAGENET_DEFAULT_STD, device=x.device).view(1, 3, 1, 1)
+    # Imagenet-normalized x yields better features using an imagenet pretrained model.
+    x = (x - img_mean) / img_std
+
     if type(model) != timm.models.vision_transformer.VisionTransformer:
         feat = model.forward_features(x)
         if use_head_feat:

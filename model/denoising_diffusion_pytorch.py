@@ -550,6 +550,7 @@ class GaussianDiffusion(nn.Module):
         num_timesteps = 1000,
         alpha_beta_schedule = 'linb',
         loss_type = 'l1',
+        consist_loss_type = 'cosine',
         objective = 'pred_noise',
         featnet_type = 'none',
         distillation_type = 'none',
@@ -624,6 +625,7 @@ class GaussianDiffusion(nn.Module):
         alphas_cumprod_prev = F.pad(alphas_cumprod[:-1], (1, 0), value = 1.)
 
         self.loss_type = loss_type
+        self.consist_loss_type = consist_loss_type
         self.laploss_fun    = LapLoss()
         
         # helper function to register buffer from float64 to float32
@@ -804,8 +806,8 @@ class GaussianDiffusion(nn.Module):
         feat_interp = self.denoise_fn.extract_pre_feat(self.denoise_fn.consistency_feat_ext, img_stu_pred, ref_shape=None, 
                                                        has_grad=True, use_head_feat=self.consistency_use_head_feat)
 
-        loss_interp1 = self.loss_fn(feat_interp, feat_gt1, reduction='none')
-        loss_interp2 = self.loss_fn(feat_interp, feat_gt2, reduction='none')
+        loss_interp1 = self.consist_loss_fn(feat_interp, feat_gt1, reduction='none')
+        loss_interp2 = self.consist_loss_fn(feat_interp, feat_gt2, reduction='none')
 
         if min_before_weight:
             # if neighbor_mask[i, pos] = 1, i.e., this pixel's feature is more similar to sub-batch1, 
@@ -857,7 +859,7 @@ class GaussianDiffusion(nn.Module):
         feat_stu = self.denoise_fn.extract_pre_feat(self.denoise_fn.consistency_feat_ext, img_stu_pred, ref_shape=None, 
                                                      has_grad=True, use_head_feat=self.consistency_use_head_feat)
 
-        loss_cls_guide = self.loss_fn(feat_stu, feat_gt)
+        loss_cls_guide = self.consist_loss_fn(feat_stu, feat_gt)
         return loss_cls_guide
 
     # inject random noise into x_start. sqrt_one_minus_alphas_cumprod_t is the std of the noise.
@@ -922,6 +924,16 @@ class GaussianDiffusion(nn.Module):
             return self.laploss
         else:
             raise ValueError(f'invalid loss type {self.loss_type}')
+
+    # return the consistency loss function
+    @property
+    def consist_loss_fn(self):
+        if self.consist_loss_type == 'l1':
+            return F.l1_loss
+        elif self.consist_loss_type == 'cosine':
+            return F.cosine_similarity
+        else:
+            raise ValueError(f'invalid consistency loss type {self.consist_loss_type}')
 
     # x_start: initial image.
     def p_losses(self, x_start, t, classes, noise = None, iter_count=0):

@@ -221,6 +221,9 @@ parser.add_argument('--sched', dest='alpha_beta_schedule', type=str, choices=['c
 
 parser.add_argument('--losstype', dest='loss_type', type=str, choices=['l1', 'l2', 'lap'], default='l1', 
                     help="Type of image denoising loss")
+parser.add_argument('--consistlosstype', dest='consist_loss_type', type=str, 
+                    choices=['l1', 'cosine'], default='cosine', 
+                    help="Type of image feature consistency loss")
 parser.add_argument('--obj', dest='objective_type', type=str, choices=['pred_noise', 'pred_x0'], default='pred_noise', 
                     help="Type of denoising objective")
 parser.add_argument('--sampinterval', dest='save_sample_interval', type=int, default=1000, 
@@ -323,6 +326,7 @@ diffusion = GaussianDiffusion(
     num_timesteps = args.num_timesteps, # number of maximum diffusion steps
     alpha_beta_schedule = args.alpha_beta_schedule, # alpha/beta schedule
     loss_type = args.loss_type,         # L1, L2, lap (Laplacian)
+    consist_loss_type = args.consist_loss_type,  # cosine, L1
     objective = args.objective_type,    # objective type, pred_noise or pred_x0
     # if do distillation and featnet_type=='mini', use a miniature of original images as privileged information to train the teacher model.
     # if do distillation and featnet_type=='resnet34' or another model name, 
