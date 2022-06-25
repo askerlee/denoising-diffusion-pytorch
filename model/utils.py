@@ -214,7 +214,7 @@ class Imagenet(BaseDataset):
         self.split = split
         self.map_file = os.path.join(self.root, 'map_clsloc.txt')
         assert os.path.exists(self.map_file), f'Lable mapping file not found at {self.map_file}!'
-        self.folder_names, self.folder2label = self.get_folder_label_mapping()
+        self.folder_names, self.cls2label = self.get_folder_label_mapping()
         # folder_list is a list of lists. Each sub-list is images in a folder (class).
         if self.split == 'test':
             self.folder_list = [ [ p for ext in exts \
@@ -248,13 +248,24 @@ class Imagenet(BaseDataset):
     # ...
     def get_folder_label_mapping(self):
         folders = []
-        folder2label = {}
+        cls2label = []
         with open(self.map_file) as f:
             for line in f:
                 tok = line.split()
                 folders.append(tok[0])
-                folder2label[tok[0]] = int(tok[1]) - 1
-        return folders, folder2label
+                cls2label.append(tok[2])
+        return folders, cls2label
+
+    def save_example(self, output_dir):
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir, exist_ok=True)
+            
+        for cls, indices in enumerate(self.cls2indices):
+            img_index = indices[0]
+            img = self.__getitem__(img_index)
+            label = self.cls2label(cls)
+            img_path = os.path.join(output_dir, f'{cls}-{label}.jpg')
+            utils.save_image(img, img_path)
 
     '''
     def resize_dataset(self, new_folder):
