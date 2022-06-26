@@ -166,15 +166,16 @@ class BaseDataset(data.Dataset):
         return: 
             images: a dict that contains a list of images and a corresponding list of classes.
         '''
-        images = { 'img': [], 'cls': [] }
+        images = { 'img': [], 'cls': [], 'img_orig': [] }
         for i in label_list:
             num_image = len(self.cls2indices[i])
             idx = np.random.randint(num_image)
             img_idx = self.cls2indices[i][idx]
-            image = self.__getitem__(img_idx)
-            images['img'].append(image['img'])
-            images['cls'].append(image['cls'])
-            images['img_orig'].append(image['img_orig'])
+            image_dict = self.__getitem__(img_idx)
+            images['img'].append(image_dict['img'])
+            images['cls'].append(image_dict['cls'])
+            images['img_orig'].append(image_dict['img_orig'])
+
         images['img'] = torch.stack(images['img'])
         images['img_orig'] = torch.stack(images['img_orig'])
         images['cls'] = torch.tensor(images['cls'])
