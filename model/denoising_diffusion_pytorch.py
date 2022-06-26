@@ -771,7 +771,7 @@ class GaussianDiffusion(nn.Module):
 
         return img
 
-    def calc_cls_interp_loss(self, img_gt, classes, min_interp_w = 0., min_before_weight=True,
+    def calc_cls_interp_loss(self, img_gt, img_orig, classes, min_interp_w = 0., min_before_weight=True,
                              noise_scheme='larger_t'):
         assert self.cls_embed_type != 'none' and exists(classes)
 
@@ -846,10 +846,13 @@ class GaussianDiffusion(nn.Module):
             img_stu_pred = self.predict_start_from_noise(img_noisy_interp, t2, img_stu_pred)
         # otherwise, objective is 'pred_x0', and pred_interp is already the predicted image.
 
-        if self.iter_count % 500 == 0:
+        if self.iter_count % 1000 == 0:
             local_rank = int(os.environ.get('LOCAL_RANK', 0))
-            img_gt_save_path = f'{self.output_dir}/interp-gt-{self.iter_count}-{local_rank}.png'
-            utils.save_image(img_gt, img_gt_save_path, nrow = 8)
+            img_gtaug_save_path = f'{self.output_dir}/interp-gtaug-{self.iter_count}-{local_rank}.png'
+            utils.save_image(img_gt,   img_gtaug_save_path,  nrow = 8)
+            img_gtorig_save_path = f'{self.output_dir}/interp-gtorig-{self.iter_count}-{local_rank}.png'
+            utils.save_image(img_orig, img_gtorig_save_path, nrow = 8)
+
             #print("GT images for interpolation are saved to", img_gt_save_path)
             img_noisy_save_path = f'{self.output_dir}/interp-noisy-{self.iter_count}-{local_rank}.png'
             utils.save_image(img_noisy_interp, img_noisy_save_path, nrow = 8)
@@ -884,7 +887,7 @@ class GaussianDiffusion(nn.Module):
 
         return loss_interp
 
-    def calc_cls_guide_loss(self, img_gt, classes, from_pure_noise=False):
+    def calc_cls_guide_loss(self, img_gt, img_orig, classes, from_pure_noise=False):
         assert self.cls_embed_type != 'none' and exists(classes)
 
         b, device = img_gt.shape[0], img_gt.device
@@ -1004,8 +1007,8 @@ class GaussianDiffusion(nn.Module):
         else:
             raise ValueError(f'invalid consistency loss type {self.consist_loss_type}')
 
-    # x_start: initial image.
-    def p_losses(self, x_start, t, classes, noise = None):
+    # x_start: initial image. x_orig: the same images without augmentation.
+    def p_losses(self, x_start, x_orig, t, classes, noise = None):
         b, c, h, w = x_start.shape
         # noise: a Gaussian noise for each pixel.
         noise = default(noise, lambda: torch.randn_like(x_start))
@@ -1056,9 +1059,9 @@ class GaussianDiffusion(nn.Module):
 
         if self.cls_guide_type != 'none':
             if self.cls_guide_type == 'simple':
-                loss_cls_guide = self.calc_cls_guide_loss(x_start, classes)
+                loss_cls_guide = self.calc_cls_guide_loss(x_start, x_orig, classes)
             elif self.cls_guide_type == 'interp':
-                loss_cls_guide = self.calc_cls_interp_loss(x_start, classes)
+                loss_cls_guide = self.calc_cls_interp_loss(x_start, x_orig, classes)
         else:
             loss_cls_guide = torch.zeros_like(loss_stu)
 
@@ -1071,7 +1074,7 @@ class GaussianDiffusion(nn.Module):
             loss = loss / loss.item()
         return { 'loss': loss, 'loss_stu': loss_stu, 'loss_tea': loss_tea, 'loss_cls_guide': loss_cls_guide }
 
-    def forward(self, img, classes, iter_count, *args, **kwargs):
+    def forward(self, img, img_orig, classes, iter_count, *args, **kwargs):
         self.iter_count = iter_count
         b, c, h, w, device, img_size, = *img.shape, img.device, self.image_size
         if not (h == img_size and w == img_size):
@@ -1088,5 +1091,5 @@ class GaussianDiffusion(nn.Module):
             t = torch.randint(0, self.num_timesteps, (b, ), device=device).long()
 
         img = normalize_to_neg_one_to_one(img)
-        return self.p_losses(img, t, classes, *args, **kwargs)
+        return self.p_losses(img, img_orig, t, classes, *args, **kwargs)
 
