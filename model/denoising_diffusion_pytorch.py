@@ -565,7 +565,7 @@ class GaussianDiffusion(nn.Module):
         cls_guide_type = 'none',
         cls_guide_loss_weight = 0.01,
         align_tea_stu_feat_weight = 0,
-        output_dir = './results',
+        sample_dir = 'samples',      
         debug = False,
         sampleseed = 5678,
     ):
@@ -602,7 +602,7 @@ class GaussianDiffusion(nn.Module):
         self.cls_guide_type             = cls_guide_type
         self.cls_guide_loss_weight      = cls_guide_loss_weight
         self.align_tea_stu_feat_weight  = align_tea_stu_feat_weight
-        self.output_dir = output_dir
+        self.sample_dir = sample_dir
         self.debug = debug
         self.num_timesteps      = num_timesteps
         self.alpha_beta_schedule = alpha_beta_schedule
@@ -856,18 +856,18 @@ class GaussianDiffusion(nn.Module):
 
         if self.iter_count % 1000 == 0:
             local_rank = int(os.environ.get('LOCAL_RANK', 0))
-            output_dir = f'{self.output_dir}/interp'
-            os.makedirs(output_dir, exist_ok=True)
-            img_gtaug_save_path  = f'{output_dir}/{self.iter_count}-{local_rank}-aug.png'
+            sample_dir = f'{self.sample_dir}/interp'
+            os.makedirs(sample_dir, exist_ok=True)
+            img_gtaug_save_path  = f'{sample_dir}/{self.iter_count}-{local_rank}-aug.png'
             unnorm_save_image(img_gt,   img_gtaug_save_path,  nrow = 8)
-            #img_gtorig_save_path = f'{output_dir}/{self.iter_count}-{local_rank}-orig.png'
+            #img_gtorig_save_path = f'{sample_dir}/{self.iter_count}-{local_rank}-orig.png'
             #unnorm_save_image(img_orig, img_gtorig_save_path, nrow = 8)
 
             #print("GT images for interpolation are saved to", img_gt_save_path)
-            img_noisy_save_path = f'{output_dir}/{self.iter_count}-{local_rank}-noisy.png'
+            img_noisy_save_path = f'{sample_dir}/{self.iter_count}-{local_rank}-noisy.png'
             unnorm_save_image(img_noisy_interp, img_noisy_save_path, nrow = 8)
             #print("Noisy images for interpolation are saved to", img_noisy_save_path)
-            img_pred_save_path  = f'{output_dir}/{self.iter_count}-{local_rank}-pred.png'
+            img_pred_save_path  = f'{sample_dir}/{self.iter_count}-{local_rank}-pred.png'
             unnorm_save_image(img_stu_pred, img_pred_save_path, nrow = 8)
             #print("Predicted images are saved to", img_pred_save_path)
 
@@ -941,19 +941,19 @@ class GaussianDiffusion(nn.Module):
 
         if self.iter_count % 1000 == 0:
             local_rank = int(os.environ.get('LOCAL_RANK', 0))
-            output_dir = f'{self.output_dir}/single'
-            os.makedirs(output_dir, exist_ok=True)
+            sample_dir = f'{self.sample_dir}/single'
+            os.makedirs(sample_dir, exist_ok=True)
 
-            img_gtaug_save_path  = f'{output_dir}/{self.iter_count}-{local_rank}-aug.png'
+            img_gtaug_save_path  = f'{sample_dir}/{self.iter_count}-{local_rank}-aug.png'
             unnorm_save_image(img_gt,   img_gtaug_save_path,  nrow = 8)
-            #img_gtorig_save_path = f'{output_dir}/{self.iter_count}-{local_rank}-orig.png'
+            #img_gtorig_save_path = f'{sample_dir}/{self.iter_count}-{local_rank}-orig.png'
             #unnorm_save_image(img_orig, img_gtorig_save_path, nrow = 8)
 
             #print("GT images for single-image class guidance are saved to", img_gt_save_path)
-            img_noisy_save_path = f'{output_dir}/{self.iter_count}-{local_rank}-noisy.png'
+            img_noisy_save_path = f'{sample_dir}/{self.iter_count}-{local_rank}-noisy.png'
             unnorm_save_image(img_noisy, img_noisy_save_path, nrow = 8)
             #print("Noisy images for single-image class guidance are saved to", img_noisy_save_path)
-            img_pred_save_path  = f'{output_dir}/{self.iter_count}-{local_rank}-pred.png'
+            img_pred_save_path  = f'{sample_dir}/{self.iter_count}-{local_rank}-pred.png'
             unnorm_save_image(img_stu_pred, img_pred_save_path, nrow = 8)
             #print("Predicted images are saved to", img_pred_save_path)
 
@@ -1055,9 +1055,9 @@ class GaussianDiffusion(nn.Module):
             x, x_tea = x_noisy
 
         if self.debug and self.iter_count < 10:
-            unnorm_save_image(x, f'{self.output_dir}/{self.iter_count}-stu.png')
+            unnorm_save_image(x, f'{self.sample_dir}/{self.iter_count}-stu.png')
             if exists(x_tea):
-                unnorm_save_image(x_tea, f'{self.output_dir}/{self.iter_count}-tea.png')
+                unnorm_save_image(x_tea, f'{self.sample_dir}/{self.iter_count}-tea.png')
 
         model_output_dict    = self.denoise_fn(x, t, classes=classes, img_tea=x_tea)
         pred_stu, pred_tea   = model_output_dict['pred_stu'],   model_output_dict['pred_tea']
@@ -1121,3 +1121,12 @@ class GaussianDiffusion(nn.Module):
         img_orig = normalize_to_neg_one_to_one(img_orig)
         return self.p_losses(img, img_orig, t, classes, *args, **kwargs)
 
+    def sample_t(self, iter_count, max_iter, b, device, min_temp=0, max_temp=1.5):
+        temperature = min_temp + (max_temp - min_temp) * (iter_count / max_iter)
+        weight = torch.arange(1, b+1, device=device).float() ** temperature
+
+        if temperature == 0:
+            return torch.randint(0, self.num_timesteps, (b, ), device=device).long()
+        else:
+            return torch.multinomial(weight, (b, ), replacement=True).long()
+            

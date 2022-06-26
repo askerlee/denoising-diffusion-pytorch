@@ -356,6 +356,8 @@ def sample_images(model, num_images, batch_size, dataset, img_save_path, nn_save
 # For ViTs, patch the original timm code to keep the spatial dimensions of the extracted image features.
 # use_head_feat: collapse geometric dimensions of the features.
 def timm_extract_features(model, x, use_head_feat=False):
+    # images have been normalized using normalize_to_neg_one_to_one(). 
+    # Before applying the model's own normalization, we have to restore them to unnormalizd images.
     x = unnormalize_to_zero_to_one(x)
     # vit uses different mean/std from repvgg & resnet.
     img_mean = torch.tensor(model.default_cfg['mean'], device=x.device).view(1, 3, 1, 1)

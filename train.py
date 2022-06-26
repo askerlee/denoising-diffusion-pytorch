@@ -23,11 +23,9 @@ class Trainer(object):
         self,
         diffusion_model,
         dataset,
-        *,
         local_rank = -1,
         world_size = 1,
         ema_decay = 0.995,
-        image_size = 128,
         train_batch_size = 32,
         train_lr = 1e-4,
         weight_decay = 0,
@@ -37,7 +35,8 @@ class Trainer(object):
         step_start_ema = 2000,
         update_ema_every = 10,
         save_and_sample_every = 1000,
-        results_folder = './results',
+        sample_dir = 'samples',
+        cp_dir = 'checkpoints',
         num_workers = 5,
         debug = False,
     ):
@@ -78,8 +77,10 @@ class Trainer(object):
         self.amp = amp
         self.scaler = GradScaler(enabled = amp)
 
-        self.results_folder = Path(results_folder)
-        self.results_folder.mkdir(exist_ok = True)
+        self.sample_dir = sample_dir
+        self.cp_dir = cp_dir
+        os.makedirs(sample_dir, exist_ok=True)
+        os.makedirs(cp_dir, exist_ok=True)
 
         self.reset_parameters()
         self.loss_meter = AverageMeters()
@@ -103,7 +104,7 @@ class Trainer(object):
             'ema':      self.ema_model.state_dict(),
             'scaler':   self.scaler.state_dict()
         }
-        torch.save(data, str(self.results_folder / f'model-{milestone:03}.pt'))
+        torch.save(data, f'{self.cp_dir}/model-{milestone:03}.pt')
 
     def load(self, milestone, rank=0):
         def convert(param):
@@ -112,8 +113,8 @@ class Trainer(object):
                 for k, v in param.items()
                 if "module." in k
             }
-            
-        data = torch.load(str(self.results_folder / f'model-{milestone}.pt'))
+        
+        data = torch.load(f'{self.cp_dir}/model-{milestone:03}.pt')
         if self.local_rank < 0:
             self.model.load_state_dict(convert(data['model']))
             self.ema_model.load_state_dict(convert(data['ema']))
@@ -183,9 +184,9 @@ class Trainer(object):
                     self.ema_model.eval()
 
                     milestone = self.step // self.save_and_sample_every
-                    # results_folder is not a string, but a Path object.
-                    img_save_path = str(self.results_folder / f'{milestone:03}-sample.png')
-                    nn_save_path  = str(self.results_folder / f'{milestone:03}-nn.png')
+                    # sample_dir is not a string, but a Path object.
+                    img_save_path = str(self.sample_dir / f'{milestone:03}-sample.png')
+                    nn_save_path  = str(self.sample_dir / f'{milestone:03}-nn.png')
                     self.save(milestone)
                     # self.dataset is provided for nearest neighbor imgae search.
                     sample_images(self.ema_model, 36, 36, self.dataset, img_save_path, nn_save_path)               
@@ -212,7 +213,11 @@ parser.add_argument('--debug', action='store_true', help='Debug the diffusion pr
 parser.add_argument('--gpus', type=int, nargs='+', default=[0, 1])
 parser.add_argument('--noamp', dest='amp', default=True, action='store_false', help='Do not use mixed precision')
 parser.add_argument('--ds', type=str, default='imagenet', help="The path of training dataset")
-parser.add_argument('--out', dest='results_folder', type=str, default='results', help="The path to save checkpoints and sampled images")
+parser.add_argument('--saveimg', dest='sample_dir', type=str, default='samples', 
+                    help="The path to save sampled images")
+parser.add_argument('--savecp',  dest='checkpoints_folder', type=str, default='checkpoints', 
+                    help="The path to save checkpoints")
+
 parser.add_argument('--times', dest='num_timesteps', type=int, default=1000, 
                     help="Number of maximum diffusion steps")
 parser.add_argument('--mem', dest='memory_size', type=int, default=1024, 
@@ -342,7 +347,8 @@ diffusion = GaussianDiffusion(
     cls_guide_type = args.cls_guide_type,
     cls_guide_loss_weight = args.cls_guide_loss_weight,
     align_tea_stu_feat_weight = args.align_tea_stu_feat_weight,
-    output_dir = args.results_folder,
+    sample_dir = args.sample_dir,
+    cp_dir     = args.checkpoints_folder,
     debug = args.debug,
     sampleseed = args.sampleseed,
 )
@@ -361,8 +367,8 @@ if args.sample_only:
     cp_trunk = os.path.basename(args.cp_path).split('.')[0]
     cp_trunk = re.match(r"model-([0-9]+)", cp_trunk).group(1)
     milestone = int(cp_trunk)
-    img_save_path = f'{args.results_folder}/{milestone:03}-sample.png'
-    nn_save_path  = f'{args.results_folder}/{milestone:03}-nn.png'
+    img_save_path = f'{args.sample_dir}/{milestone:03}-sample.png'
+    nn_save_path  = f'{args.sample_dir}/{milestone:03}-nn.png'
     # dataset is provided for nearest neighbor imgae search.
     sample_images(diffusion, 36, 36, dataset, img_save_path, nn_save_path)
     exit()
@@ -378,7 +384,8 @@ trainer = Trainer(
     gradient_accumulate_every = 2,      # gradient accumulation steps
     ema_decay = 0.995,                  # exponential moving average decay
     amp = args.amp,                     # turn on mixed precision. Default: True
-    results_folder = args.results_folder,
+    sample_dir  = args.sample_dir,
+    cp_dir      = args.cp_dir,
     save_and_sample_every = args.save_sample_interval,
 )
 

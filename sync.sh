@@ -10,7 +10,7 @@ rsync shaohua@172.20.74.65:denoising-diffusion-pytorch/results/'*png' $ROOT/deno
 rsync shaohua@172.20.74.65:denoising-diffusion-pytorch/results/interp/'*png' $ROOT/denoising/74.65-clssingle-tea-geo-bs96/interp/ -aic  2>&1|grep -E "fcstp|f\\+\\+"
 rsync shaohua@172.20.74.65:denoising-diffusion-pytorch/results/single/'*png' $ROOT/denoising/74.65-clssingle-tea-geo-bs96/single/ -aic  2>&1|grep -E "fcstp|f\\+\\+"
 echo "172.20.117.215"
-rsync shaohua@172.20.117.215:denoising-diffusion-pytorch/results/'*png' $ROOT/denoising/117.215-pok-gtinterp1-tea/ -aic 2>&1|grep -E "fcstp|f\\+\\+"
+rsync shaohua@172.20.117.215:denoising-diffusion-pytorch/results/'*png' $ROOT/denoising/117.215-pok-clssingle-tea/ -aic 2>&1|grep -E "fcstp|f\\+\\+"
 #echo "10.2.18.238"
 #rsync shaohua@10.2.18.238:denoising-diffusion-pytorch/results/'*png' $ROOT/denoising/18.238-clsguide-repvgg-full/ -aic  2>&1|grep -E "fcstp|f\+\+"
 echo "10.2.18.254-1"
