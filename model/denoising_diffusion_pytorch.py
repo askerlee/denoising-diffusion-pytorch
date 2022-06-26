@@ -802,12 +802,16 @@ class GaussianDiffusion(nn.Module):
         noise = torch.randn_like(img_gt)
         if noise_scheme == 'pure_noise':
             t2 = torch.full((b2, ), self.num_timesteps - 1, device=device, dtype=torch.long)
-            img_noisy_interp = noise[:b2]   # Pure noise
+            img_noisy_interp = noise[:b2]
+
         elif noise_scheme == 'large_t':
             # Only use the largest 1/4 of possible t values to inject noises.
             t2 = torch.randint(int(self.num_timesteps * 0.75), self.num_timesteps, (b2, ), device=device).long()
             t  = t2.repeat(2)
             img_noisy = self.q_sample(x_start=img_gt, t=t, noise=noise, distill_t_frac=-1)
+            img_noisy1, img_noisy2 = img_noisy[:b2], img_noisy[b2:]
+            img_noisy_interp = w * img_noisy1 + (1 - w) * img_noisy2
+
         elif noise_scheme == 'almost_pure_noise':
             t2 = torch.full((b2, ), self.num_timesteps - 1, device=device, dtype=torch.long)
             # self.alphas_cumprod[-1] = 0. So take -2 as the minimal alpha_cumprod, and scale it by 0.1.
