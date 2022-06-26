@@ -791,7 +791,7 @@ class GaussianDiffusion(nn.Module):
         else:
             # self.alphas_cumprod[-1] = 0. So take -2 as the minimal alpha_cumprod, 
             # and scale it down to 0.01. (0.1 after sqrt)
-            alpha_cumprod = self.alphas_cumprod[-2] * 0.01
+            alpha_cumprod = self.alphas_cumprod[-2] * 0.1
             alphas_cumprod = torch.full((b, ), alpha_cumprod, device=device, dtype=img_gt.dtype)
             alphas_cumprod = alphas_cumprod.view(b, *((1,) * (len(img_gt.shape) - 1)))
             x_start_weight  = torch.sqrt(alphas_cumprod)
@@ -856,7 +856,7 @@ class GaussianDiffusion(nn.Module):
         else:
             # self.alphas_cumprod[-1] = 0. So take -2 as the minimal alpha_cumprod, 
             # and scale it down to 0.01. (0.1 after sqrt)
-            alpha_cumprod = self.alphas_cumprod[-2] * 0.01
+            alpha_cumprod = self.alphas_cumprod[-2] * 0.1
             alphas_cumprod = torch.full((b, ), alpha_cumprod, device=device, dtype=img_gt.dtype)
             alphas_cumprod = alphas_cumprod.view(b, *((1,) * (len(img_gt.shape) - 1)))
             x_start_weight  = torch.sqrt(alphas_cumprod)
