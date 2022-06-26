@@ -806,7 +806,8 @@ class GaussianDiffusion(nn.Module):
         elif noise_scheme == 'large_t':
             # Only use the largest 1/4 of possible t values to inject noises.
             t2 = torch.randint(int(self.num_timesteps * 0.75), self.num_timesteps, (b2, ), device=device).long()
-            img_noisy = self.q_sample(x_start=img_gt, t=t2, noise=noise, distill_t_frac=-1)
+            t  = t2.repeat(2)
+            img_noisy = self.q_sample(x_start=img_gt, t=t, noise=noise, distill_t_frac=-1)
         elif noise_scheme == 'almost_pure_noise':
             t2 = torch.full((b2, ), self.num_timesteps - 1, device=device, dtype=torch.long)
             # self.alphas_cumprod[-1] = 0. So take -2 as the minimal alpha_cumprod, and scale it by 0.1.
