@@ -1090,7 +1090,7 @@ class GaussianDiffusion(nn.Module):
             loss_align_tea_stu = torch.zeros_like(loss_stu)
 
         if self.cls_guide_type != 'none':
-            if self.cls_guide_type == 'simple':
+            if self.cls_guide_type == 'single':
                 loss_cls_guide = self.calc_cls_guide_loss(x_start, x_orig, classes)
             elif self.cls_guide_type == 'interp':
                 loss_cls_guide = self.calc_cls_interp_loss(x_start, x_orig, classes)

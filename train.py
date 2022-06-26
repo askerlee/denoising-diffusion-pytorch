@@ -246,8 +246,8 @@ parser.add_argument('--alignfeat', dest='align_tea_stu_feat_weight', default=0.0
                     'Default: 0.0, meaning no alignment.')
 parser.add_argument('--clsembed', dest='cls_embed_type', choices=['none', 'tea_stu'], default='none', 
                     help='How class embedding is incorporated in the student and teacher')
-parser.add_argument('--clsguide', dest='cls_guide_type', choices=['none', 'simple', 'interp'], default='simple', 
-                    help='The type of class guidance: none, simple (one class only), '
+parser.add_argument('--clsguide', dest='cls_guide_type', choices=['none', 'single', 'interp'], default='single', 
+                    help='The type of class guidance: none, single (one class only), '
                          'or interp (interpolation between two classes to enforce class embedding linearity)')
 parser.add_argument('--wclsguide', dest='cls_guide_loss_weight', default=0.001, type=float, 
                     help='Guide denoising random images with class embedding. ')
