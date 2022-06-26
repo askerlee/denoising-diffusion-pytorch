@@ -134,11 +134,12 @@ class Trainer(object):
 
                 for i in range(self.gradient_accumulate_every):
                     data = next(self.dl)
-                    img     = data['img'].cuda()
-                    classes = data['cls'].cuda()
+                    img         = data['img'].cuda()
+                    img_orig    = data['img_orig'].cuda()
+                    classes     = data['cls'].cuda()
 
                     with autocast(enabled = self.amp):
-                        loss_dict = self.model(img, classes, iter_count=self.step)
+                        loss_dict = self.model(img, img_orig, classes, iter_count=self.step)
                         # For multiple GPUs, loss is a list.
                         # Since the loss on each GPU is MAE per pixel, we should also average them here,
                         # to make the loss consistent with being on a single GPU.
