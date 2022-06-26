@@ -789,11 +789,13 @@ class GaussianDiffusion(nn.Module):
             img_gt1         = img_gt[:b2]
             img_gt2_dict    = self.dataset.sample_by_labels(classes1)
             img_gt2         = img_gt2_dict['img'].cuda()
+            img_gt2         = normalize_to_neg_one_to_one(img_gt2)
             # Replace the second half of img_gt with randomly sampled images 
             # that are of the same classes as img_gt1.
             img_gt          = torch.cat([img_gt1, img_gt2], dim=0)
             img_orig1       = img_orig[:b2]
             img_orig2       = img_gt2_dict['img_orig'].cuda()
+            img_orig2       = normalize_to_neg_one_to_one(img_orig2)
             img_orig        = torch.cat([img_orig1, img_orig2], dim=0)
             classes         = classes1.repeat(2)
 
@@ -1110,14 +1112,9 @@ class GaussianDiffusion(nn.Module):
             print0(f'height and width of image must be {img_size}')
             breakpoint()
         
-        if self.distillation_type == 'tfrac' and self.interp_loss_weight > 0:
-            assert b % 2 == 0
-            # Two sub-batches use the same random timesteps.
-            t = torch.randint(0, self.num_timesteps, (b//2, ), device=device).long().repeat(2)
-        else:
-            # t: random numbers of steps between 0 and num_timesteps - 1 (num_timesteps default is 1000)
-            # (b,): different random steps for different images in a batch.
-            t = torch.randint(0, self.num_timesteps, (b, ), device=device).long()
+        # t: random numbers of steps between 0 and num_timesteps - 1 (num_timesteps default is 1000)
+        # (b,): different random steps for different images in a batch.
+        t = torch.randint(0, self.num_timesteps, (b, ), device=device).long()
 
         img = normalize_to_neg_one_to_one(img)
         return self.p_losses(img, img_orig, t, classes, *args, **kwargs)

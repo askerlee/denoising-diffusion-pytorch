@@ -132,7 +132,8 @@ class BaseDataset(data.Dataset):
 
         self.tv_transform = transforms.Compose([
             ToPILImage(),
-            ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.5/3.14),
+            Resize((image_size, image_size)),
+            ColorJitter(brightness=0.3, contrast=0.3, saturation=0.3, hue=0.5/3.14),
             ToTensor()
         ])
 
@@ -145,7 +146,8 @@ class BaseDataset(data.Dataset):
         img_orig = self.test_transform(img)
 
         if self.training:
-            img_aug = self.geo_aug_func.augment_image(np.array(img)).copy()
+            img_aug = img
+            #img_aug = self.geo_aug_func.augment_image(np.array(img)).copy()
             img_aug = self.tv_transform(img_aug)
         else:
             img_aug = img_orig
@@ -355,6 +357,7 @@ def sample_images(model, num_images, batch_size, dataset, img_save_path, nn_save
 # For ViTs, patch the original timm code to keep the spatial dimensions of the extracted image features.
 # use_head_feat: collapse geometric dimensions of the features.
 def timm_extract_features(model, x, use_head_feat=False):
+    x = unnormalize_to_zero_to_one(x)
     # vit uses different mean/std from repvgg & resnet.
     img_mean = torch.tensor(model.default_cfg['mean'], device=x.device).view(1, 3, 1, 1)
     img_std  = torch.tensor(model.default_cfg['std'],  device=x.device).view(1, 3, 1, 1)
