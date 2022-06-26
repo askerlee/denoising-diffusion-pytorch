@@ -348,7 +348,6 @@ diffusion = GaussianDiffusion(
     cls_guide_loss_weight = args.cls_guide_loss_weight,
     align_tea_stu_feat_weight = args.align_tea_stu_feat_weight,
     sample_dir = args.sample_dir,
-    cp_dir     = args.checkpoints_folder,
     debug = args.debug,
     sampleseed = args.sampleseed,
 )
