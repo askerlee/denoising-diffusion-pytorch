@@ -336,6 +336,7 @@ diffusion = GaussianDiffusion(
     distill_t_frac = args.distill_t_frac,
     cls_embed_type = args.cls_embed_type,
     num_classes = num_classes,
+    dataset = dataset,
     consistency_use_head_feat = args.consistency_use_head_feat,
     cls_guide_type = args.cls_guide_type,
     cls_guide_loss_weight = args.cls_guide_loss_weight,

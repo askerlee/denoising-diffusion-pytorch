@@ -10,7 +10,7 @@ import timm
 from einops import rearrange
 from .laplacian import LapLoss
 from .utils import timm_extract_features, print0, exists, exists_add, repeat_interleave, \
-                   default, normalize_to_neg_one_to_one, unnormalize_to_zero_to_one
+                   default, normalize_to_neg_one_to_one, unnormalize_to_zero_to_one, SimpleDataset
 
 timm_model2dim = { 'resnet34': 512,
                    'resnet18': 512,
@@ -557,6 +557,7 @@ class GaussianDiffusion(nn.Module):
         distill_t_frac = 0.,
         cls_embed_type = 'none',
         num_classes = -1,
+        dataset = None,
         consistency_use_head_feat = True,
         cls_guide_type = 'none',
         cls_guide_loss_weight = 0.01,
@@ -584,6 +585,7 @@ class GaussianDiffusion(nn.Module):
         self.distill_t_frac     = distill_t_frac if (self.distillation_type == 'tfrac') else -1
         self.cls_embed_type     = cls_embed_type
         self.num_classes        = num_classes
+        self.dataset            = dataset
         # It's possible that self.num_classes < 0, i.e., the number of classes is not provided.
         # In this case, we set cls_embed_type to 'none'.
         if self.num_classes <= 0:
@@ -768,13 +770,26 @@ class GaussianDiffusion(nn.Module):
         return img
 
     def calc_cls_interp_loss(self, img_gt, classes, min_interp_w = 0., min_before_weight=True,
-                             from_pure_noise=False):
+                             noise_scheme='large_t'):
         assert self.cls_embed_type != 'none' and exists(classes)
 
         b, device = img_gt.shape[0], img_gt.device
         assert b % 2 == 0
         b2 = b // 2
+        classes1    = classes[:b2]
 
+        # In SimpleDataset, each image is a class. So we don't have 
+        # different same-class images to do interpolation.
+        within_same_class = not isinstance(self.dataset, SimpleDataset)
+
+        if within_same_class:
+            img_gt1         = img_gt[:b2]
+            img_gt2_dict    = self.dataset.sample_by_labels(classes1)
+            img_gt2         = img_gt2_dict['img'].cuda()
+            # Replace the second half of img_gt with randomly sampled images 
+            # that are of the same classes as img_gt1.
+            img_gt          = torch.cat([img_gt1, img_gt2], dim=0)
+            
         feat_gt = self.denoise_fn.extract_pre_feat(self.denoise_fn.consistency_feat_ext, img_gt, ref_shape=None, 
                                                    has_grad=True, use_head_feat=self.consistency_use_head_feat)        
         feat_gt1, feat_gt2  = feat_gt[:b2], feat_gt[b2:]
@@ -784,25 +799,35 @@ class GaussianDiffusion(nn.Module):
         # w.shape: (b2, 1, 1, 1)
         w = w.view(b2, *((1,) * (len(img_gt.shape) - 1)))
 
-        t2 = torch.full((b2, ), self.num_timesteps - 1, device=device, dtype=torch.long)
         noise = torch.randn_like(img_gt)
-        if from_pure_noise:
+        if noise_scheme == 'pure_noise':
+            t2 = torch.full((b2, ), self.num_timesteps - 1, device=device, dtype=torch.long)
             img_noisy_interp = noise[:b2]   # Pure noise
-        else:
-            # self.alphas_cumprod[-1] = 0. So take -2 as the minimal alpha_cumprod, 
-            alpha_cumprod = self.alphas_cumprod[-2] #* 0.1
-            alphas_cumprod = torch.full((b, ), alpha_cumprod, device=device, dtype=img_gt.dtype)
-            alphas_cumprod = alphas_cumprod.view(b, *((1,) * (len(img_gt.shape) - 1)))
+        elif noise_scheme == 'large_t':
+            # Only use the largest 1/4 of possible t values to inject noises.
+            t2 = torch.randint(int(self.num_timesteps * 0.75), self.num_timesteps, (b2, ), device=device).long()
+            img_noisy = self.q_sample(x_start=img_gt, t=t2, noise=noise, distill_t_frac=-1)
+        elif noise_scheme == 'almost_pure_noise':
+            t2 = torch.full((b2, ), self.num_timesteps - 1, device=device, dtype=torch.long)
+            # self.alphas_cumprod[-1] = 0. So take -2 as the minimal alpha_cumprod, and scale it by 0.1.
+            alpha_cumprod   = self.alphas_cumprod[-2] * 0.1
+            alphas_cumprod  = torch.full((b, ), alpha_cumprod, device=device, dtype=img_gt.dtype)
+            alphas_cumprod  = alphas_cumprod.view(b, *((1,) * (len(img_gt.shape) - 1)))
             x_start_weight  = torch.sqrt(alphas_cumprod)
             noise_weight    = torch.sqrt(1 - alphas_cumprod)
             img_noisy       = x_start_weight * img_gt + noise_weight * noise
             img_noisy1, img_noisy2 = img_noisy[:b2], img_noisy[b2:]
             img_noisy_interp = w * img_noisy1 + (1 - w) * img_noisy2
 
-        cls_embed = self.denoise_fn.cls_embedding(classes)
-        cls_embed = cls_embed.view(b, *((1,) * (len(img_gt.shape) - 2)), -1)
-        cls_embed1, cls_embed2 = cls_embed[:b2], cls_embed[b2:]
-        cls_embed_interp = w * cls_embed1 + (1 - w) * cls_embed2
+        # Embeddings of the first and second halves are the same. 
+        # No need to do interpolation on class embedding.
+        if within_same_class:
+            cls_embed_interp = self.denoise_fn.cls_embedding(classes1)
+        else:
+            cls_embed = self.denoise_fn.cls_embedding(classes)
+            cls_embed = cls_embed.view(b, *((1,) * (len(img_gt.shape) - 2)), -1)
+            cls_embed1, cls_embed2 = cls_embed[:b2], cls_embed[b2:]
+            cls_embed_interp = w * cls_embed1 + (1 - w) * cls_embed2
 
         # Setting the last param (img_tea) to None, so that teacher module won't be executed, 
         # to reduce unnecessary compute.

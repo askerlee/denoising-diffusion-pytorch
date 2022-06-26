@@ -173,6 +173,10 @@ class BaseDataset(data.Dataset):
             image = self.__getitem__(img_idx)
             images['img'].append(image['img'])
             images['cls'].append(image['cls'])
+
+        images['img'] = torch.stack(images['img'])
+        images['cls'] = torch.stack(images['cls'])
+        
         return images
 
 def aspect_preserving_resize(image, min_size=128):

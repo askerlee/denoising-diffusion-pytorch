@@ -12,6 +12,6 @@ rsync shaohua@172.20.117.215:denoising-diffusion-pytorch/results/'*png' $ROOT/de
 #echo "10.2.18.238"
 #rsync shaohua@10.2.18.238:denoising-diffusion-pytorch/results/'*png' $ROOT/denoising/18.238-clsguide-repvgg-full/ -aic  2>&1|grep -E "fcstp|f\+\+"
 echo "10.2.18.254-1"
-rsync li_shaohua@10.2.18.254:denoising-diffusion-pytorch/results/'*png' $ROOT/denoising/18.254-gtinterp-tea-bs96/ -aic  2>&1|grep -E "fcstp|f\+\+"
+rsync li_shaohua@10.2.18.254:denoising-diffusion-pytorch/results/'*png' $ROOT/denoising/18.254-gtinterp1-tea-bs96/ -aic  2>&1|grep -E "fcstp|f\+\+"
 #echo "10.2.18.254-2"
 #rsync li_shaohua@10.2.18.254:denoising-diffusion-pytorch/results2/'*png' $ROOT/denoising/18.254-dualcls-tea-repvgg/ -aic  2>&1|grep -E "fcstp|f\+\+"
