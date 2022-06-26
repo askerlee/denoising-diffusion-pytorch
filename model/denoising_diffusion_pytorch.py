@@ -826,16 +826,6 @@ class GaussianDiffusion(nn.Module):
             img_noisy1, img_noisy2 = img_noisy[:b2], img_noisy[b2:]
             img_noisy_interp = w * img_noisy1 + (1 - w) * img_noisy2
 
-        if self.iter_count == 0:
-            local_rank = int(os.environ.get('LOCAL_RANK', 0))
-            if local_rank <= 0:
-                img_gt_save_path = f'{self.output_dir}/gt-interp.png'
-                utils.save_image(img_gt, img_gt_save_path, nrow = 8)
-                print("A batch of gt images for interpolation is saved to", img_gt_save_path)
-                img_noisy_save_path = f'{self.output_dir}/noisy-interp.png'
-                utils.save_image(img_noisy, img_noisy_save_path, nrow = 8)
-                print("A batch of noisy images for interpolation is saved to", img_noisy_save_path)
-
         # Embeddings of the first and second halves are the same. 
         # No need to do interpolation on class embedding.
         if within_same_class:
@@ -855,7 +845,20 @@ class GaussianDiffusion(nn.Module):
             # img_stu_pred is the predicted noises. Subtract it from img_interp to get the predicted image.
             img_stu_pred = self.predict_start_from_noise(img_noisy_interp, t2, img_stu_pred)
         # otherwise, objective is 'pred_x0', and pred_interp is already the predicted image.
-            
+
+        if self.iter_count % 500 == 0:
+            local_rank = int(os.environ.get('LOCAL_RANK', 0))
+            if local_rank <= 0:
+                img_gt_save_path = f'{self.output_dir}/interp-gt-{self.iter_count}.png'
+                utils.save_image(img_gt, img_gt_save_path, nrow = 8)
+                print("GT images for interpolation are saved to", img_gt_save_path)
+                img_noisy_save_path = f'{self.output_dir}/interp-noisy-{self.iter_count}.png'
+                utils.save_image(img_noisy, img_noisy_save_path, nrow = 8)
+                print("Noisy images for interpolation are saved to", img_noisy_save_path)
+                img_pred_save_path = f'{self.output_dir}/interp-pred-{self.iter_count}.png'
+                utils.save_image(img_stu_pred, img_pred_save_path, nrow = 8)
+                print("Predicted images are saved to", img_pred_save_path)
+
         feat_interp = self.denoise_fn.extract_pre_feat(self.denoise_fn.consistency_feat_ext, img_stu_pred, ref_shape=None, 
                                                        has_grad=True, use_head_feat=self.consistency_use_head_feat)
 
