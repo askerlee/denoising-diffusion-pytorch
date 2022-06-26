@@ -853,16 +853,18 @@ class GaussianDiffusion(nn.Module):
 
         if self.iter_count % 1000 == 0:
             local_rank = int(os.environ.get('LOCAL_RANK', 0))
-            img_gtaug_save_path = f'{self.output_dir}/interp-gtaug-{self.iter_count}-{local_rank}.png'
+            output_dir = f'{self.output_dir}/interp'
+            os.makedirs(output_dir, exist_ok=True)
+            img_gtaug_save_path  = f'{output_dir}/{self.iter_count}-{local_rank}-aug.png'
             utils.save_image(img_gt,   img_gtaug_save_path,  nrow = 8)
-            img_gtorig_save_path = f'{self.output_dir}/interp-gtorig-{self.iter_count}-{local_rank}.png'
+            img_gtorig_save_path = f'{output_dir}/{self.iter_count}-{local_rank}-orig.png'
             utils.save_image(img_orig, img_gtorig_save_path, nrow = 8)
 
             #print("GT images for interpolation are saved to", img_gt_save_path)
-            img_noisy_save_path = f'{self.output_dir}/interp-noisy-{self.iter_count}-{local_rank}.png'
+            img_noisy_save_path = f'{output_dir}/{self.iter_count}-{local_rank}-noisy.png'
             utils.save_image(img_noisy_interp, img_noisy_save_path, nrow = 8)
             #print("Noisy images for interpolation are saved to", img_noisy_save_path)
-            img_pred_save_path = f'{self.output_dir}/interp-pred-{self.iter_count}-{local_rank}.png'
+            img_pred_save_path  = f'{output_dir}/{self.iter_count}-{local_rank}-pred.png'
             utils.save_image(img_stu_pred, img_pred_save_path, nrow = 8)
             #print("Predicted images are saved to", img_pred_save_path)
 
@@ -936,16 +938,19 @@ class GaussianDiffusion(nn.Module):
 
         if self.iter_count % 1000 == 0:
             local_rank = int(os.environ.get('LOCAL_RANK', 0))
-            img_gtaug_save_path = f'{self.output_dir}/single-gtaug-{self.iter_count}-{local_rank}.png'
+            output_dir = f'{self.output_dir}/single'
+            os.makedirs(output_dir, exist_ok=True)
+
+            img_gtaug_save_path  = f'{output_dir}/{self.iter_count}-{local_rank}-aug.png'
             utils.save_image(img_gt,   img_gtaug_save_path,  nrow = 8)
-            img_gtorig_save_path = f'{self.output_dir}/single-gtorig-{self.iter_count}-{local_rank}.png'
+            img_gtorig_save_path = f'{output_dir}/{self.iter_count}-{local_rank}-orig.png'
             utils.save_image(img_orig, img_gtorig_save_path, nrow = 8)
 
             #print("GT images for single-image class guidance are saved to", img_gt_save_path)
-            img_noisy_save_path = f'{self.output_dir}/single-noisy-{self.iter_count}-{local_rank}.png'
+            img_noisy_save_path = f'{output_dir}/{self.iter_count}-{local_rank}-noisy.png'
             utils.save_image(img_noisy, img_noisy_save_path, nrow = 8)
             #print("Noisy images for single-image class guidance are saved to", img_noisy_save_path)
-            img_pred_save_path = f'{self.output_dir}/single-pred-{self.iter_count}-{local_rank}.png'
+            img_pred_save_path  = f'{output_dir}/{self.iter_count}-{local_rank}-pred.png'
             utils.save_image(img_stu_pred, img_pred_save_path, nrow = 8)
             #print("Predicted images are saved to", img_pred_save_path)
 
