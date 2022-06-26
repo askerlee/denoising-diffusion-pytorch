@@ -848,16 +848,15 @@ class GaussianDiffusion(nn.Module):
 
         if self.iter_count % 500 == 0:
             local_rank = int(os.environ.get('LOCAL_RANK', 0))
-            if local_rank <= 0:
-                img_gt_save_path = f'{self.output_dir}/interp-gt-{self.iter_count}.png'
-                utils.save_image(img_gt, img_gt_save_path, nrow = 8)
-                print("GT images for interpolation are saved to", img_gt_save_path)
-                img_noisy_save_path = f'{self.output_dir}/interp-noisy-{self.iter_count}.png'
-                utils.save_image(img_noisy, img_noisy_save_path, nrow = 8)
-                print("Noisy images for interpolation are saved to", img_noisy_save_path)
-                img_pred_save_path = f'{self.output_dir}/interp-pred-{self.iter_count}.png'
-                utils.save_image(img_stu_pred, img_pred_save_path, nrow = 8)
-                print("Predicted images are saved to", img_pred_save_path)
+            img_gt_save_path = f'{self.output_dir}/interp-gt-{self.iter_count}-{local_rank}.png'
+            utils.save_image(img_gt, img_gt_save_path, nrow = 8)
+            print("GT images for interpolation are saved to", img_gt_save_path)
+            img_noisy_save_path = f'{self.output_dir}/interp-noisy-{self.iter_count}-{local_rank}.png'
+            utils.save_image(img_noisy, img_noisy_save_path, nrow = 8)
+            print("Noisy images for interpolation are saved to", img_noisy_save_path)
+            img_pred_save_path = f'{self.output_dir}/interp-pred-{self.iter_count}-{local_rank}.png'
+            utils.save_image(img_stu_pred, img_pred_save_path, nrow = 8)
+            print("Predicted images are saved to", img_pred_save_path)
 
         feat_interp = self.denoise_fn.extract_pre_feat(self.denoise_fn.consistency_feat_ext, img_stu_pred, ref_shape=None, 
                                                        has_grad=True, use_head_feat=self.consistency_use_head_feat)
