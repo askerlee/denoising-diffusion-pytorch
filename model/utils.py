@@ -133,7 +133,7 @@ class BaseDataset(data.Dataset):
         self.tv_transform = transforms.Compose([
             ToPILImage(),
             Resize((image_size, image_size)),
-            ColorJitter(brightness=0.3, contrast=0.3, saturation=0.3, hue=0.5/3.14),
+            ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.5/3.14),
             ToTensor()
         ])
 
