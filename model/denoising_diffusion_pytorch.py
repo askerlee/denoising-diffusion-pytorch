@@ -1118,5 +1118,6 @@ class GaussianDiffusion(nn.Module):
         t = torch.randint(0, self.num_timesteps, (b, ), device=device).long()
 
         img = normalize_to_neg_one_to_one(img)
+        img_orig = normalize_to_neg_one_to_one(img_orig)
         return self.p_losses(img, img_orig, t, classes, *args, **kwargs)
 
