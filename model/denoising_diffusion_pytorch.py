@@ -767,7 +767,8 @@ class GaussianDiffusion(nn.Module):
 
         return img
 
-    def calc_cls_interp_loss(self, img_gt, classes, min_interp_w = 0., min_before_weight=True):
+    def calc_cls_interp_loss(self, img_gt, classes, min_interp_w = 0., min_before_weight=True,
+                             from_pure_noise=False):
         assert self.cls_embed_type != 'none' and exists(classes)
 
         b, device = img_gt.shape[0], img_gt.device
@@ -776,8 +777,7 @@ class GaussianDiffusion(nn.Module):
 
         feat_gt = self.denoise_fn.extract_pre_feat(self.denoise_fn.consistency_feat_ext, img_gt, ref_shape=None, 
                                                    has_grad=True, use_head_feat=self.consistency_use_head_feat)        
-        feat_gt1, feat_gt2 = feat_gt[:b2], feat_gt[b2:]
-
+        feat_gt1, feat_gt2  = feat_gt[:b2], feat_gt[b2:]
         w = torch.rand((b2, ), device=img_gt.device)
         # Normalize w into [min_interp_w, 1-min_interp_w], i.e., [0.2, 0.8].
         w = (1 - 2 * min_interp_w) * w + min_interp_w
@@ -785,8 +785,19 @@ class GaussianDiffusion(nn.Module):
         w = w.view(b2, *((1,) * (len(img_gt.shape) - 1)))
 
         t2 = torch.full((b2, ), self.num_timesteps - 1, device=device, dtype=torch.long)
-        noise = torch.randn_like(img_gt[:b2])
-        img_noisy = noise   # Pure noise
+        noise = torch.randn_like(img_gt)
+        if from_pure_noise:
+            img_noisy_interp = noise[:b2]   # Pure noise
+        else:
+            # self.alphas_cumprod[-1] = 0. So take -2 as the minimal alpha_cumprod, 
+            # and scale it down to 0.01. (0.1 after sqrt)
+            alpha_cumprod = self.alphas_cumprod[-2] * 0.01
+            alphas_cumprod = torch.full((b, ), alpha_cumprod, device=device, dtype=img_gt.dtype)
+            x_start_weight  = torch.sqrt(alphas_cumprod)
+            noise_weight    = torch.sqrt(1 - alphas_cumprod)
+            img_noisy       = x_start_weight * img_gt + noise_weight * noise
+            img_noisy1, img_noisy2 = img_noisy[:b2], img_noisy2[b2:]
+            img_noisy_interp = w * img_noisy1 + (1 - w) * img_noisy2
 
         cls_embed = self.denoise_fn.cls_embedding(classes)
         cls_embed = cls_embed.view(b, *((1,) * (len(img_gt.shape) - 2)), -1)
@@ -800,7 +811,7 @@ class GaussianDiffusion(nn.Module):
 
         if self.objective == 'pred_noise':
             # img_stu_pred is the predicted noises. Subtract it from img_interp to get the predicted image.
-            img_stu_pred = self.predict_start_from_noise(img_noisy, t2, img_stu_pred)
+            img_stu_pred = self.predict_start_from_noise(img_noisy_interp, t2, img_stu_pred)
         # otherwise, objective is 'pred_x0', and pred_interp is already the predicted image.
             
         feat_interp = self.denoise_fn.extract_pre_feat(self.denoise_fn.consistency_feat_ext, img_stu_pred, ref_shape=None, 
@@ -829,7 +840,7 @@ class GaussianDiffusion(nn.Module):
 
         return loss_interp
 
-    def calc_cls_guide_loss(self, img_gt, classes):
+    def calc_cls_guide_loss(self, img_gt, classes, from_pure_noise=False):
         assert self.cls_embed_type != 'none' and exists(classes)
 
         b, device = img_gt.shape[0], img_gt.device
@@ -838,6 +849,17 @@ class GaussianDiffusion(nn.Module):
         # t = torch.randint(0, self.num_timesteps, (b, ), device=device).long()
         t = torch.full((b, ), self.num_timesteps - 1, device=device, dtype=torch.long)
         noise = torch.randn_like(img_gt)
+
+        if from_pure_noise:
+            img_noisy = noise   # Pure noise
+        else:
+            # self.alphas_cumprod[-1] = 0. So take -2 as the minimal alpha_cumprod, 
+            # and scale it down to 0.01. (0.1 after sqrt)
+            alpha_cumprod = self.alphas_cumprod[-2] * 0.01
+            alphas_cumprod = torch.full((b, ), alpha_cumprod, device=device, dtype=img_gt.dtype)
+            x_start_weight  = torch.sqrt(alphas_cumprod)
+            noise_weight    = torch.sqrt(1 - alphas_cumprod)
+            img_noisy       = x_start_weight * img_gt + noise_weight * noise
 
         # img_noisy = self.q_sample(x_start=img_gt, t=t, noise=noise)
         img_noisy = noise   # Pure noise
