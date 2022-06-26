@@ -807,7 +807,7 @@ class GaussianDiffusion(nn.Module):
 
         # Setting the last param (img_tea) to None, so that teacher module won't be executed, 
         # to reduce unnecessary compute.
-        model_output_dict = self.denoise_fn(img_noisy, t2, cls_embed=cls_embed_interp)
+        model_output_dict = self.denoise_fn(img_noisy_interp, t2, cls_embed=cls_embed_interp)
         img_stu_pred = model_output_dict['pred_stu']
 
         if self.objective == 'pred_noise':
