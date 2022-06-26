@@ -774,13 +774,13 @@ class GaussianDiffusion(nn.Module):
         return img
 
     def calc_cls_interp_loss(self, img_gt, img_orig, classes, min_interp_w = 0., min_before_weight=True,
-                             noise_scheme='larger_t'):
+                             noise_scheme='larger_t', min_t_percentile=0.75):
         assert self.cls_embed_type != 'none' and exists(classes)
 
         b, device = img_gt.shape[0], img_gt.device
         assert b % 2 == 0
         b2 = b // 2
-        classes1    = classes[:b2]
+        classes1 = classes[:b2]
 
         # In SimpleDataset, each image is a class. So we don't have 
         # different same-class images to do interpolation.
@@ -816,7 +816,7 @@ class GaussianDiffusion(nn.Module):
 
         elif noise_scheme == 'larger_t':
             # Only use the largest 1/4 of possible t values to inject noises.
-            t2 = torch.randint(int(self.num_timesteps * 0.75), self.num_timesteps, (b2, ), device=device).long()
+            t2 = torch.randint(int(self.num_timesteps * min_t_percentile), self.num_timesteps, (b2, ), device=device).long()
             t  = t2.repeat(2)
             img_noisy = self.q_sample(x_start=img_gt, t=t, noise=noise, distill_t_frac=-1)
             img_noisy1, img_noisy2 = img_noisy[:b2], img_noisy[b2:]
@@ -897,7 +897,7 @@ class GaussianDiffusion(nn.Module):
 
         return loss_interp
 
-    def calc_cls_guide_loss(self, img_gt, img_orig, classes, noise_scheme='larger_t'):
+    def calc_cls_single_loss(self, img_gt, img_orig, classes, noise_scheme='larger_t', min_t_percentile=0.9):
         assert self.cls_embed_type != 'none' and exists(classes)
 
         b, device = img_gt.shape[0], img_gt.device
@@ -910,8 +910,8 @@ class GaussianDiffusion(nn.Module):
             img_noisy = noise
 
         elif noise_scheme == 'larger_t':
-            # Only use the largest 1/4 of possible t values to inject noises.
-            t = torch.randint(int(self.num_timesteps * 0.75), self.num_timesteps, (b, ), device=device).long()
+            # Only use the largest 1/10 of possible t values to inject noises.
+            t = torch.randint(int(self.num_timesteps * min_t_percentile), self.num_timesteps, (b, ), device=device).long()
             img_noisy = self.q_sample(x_start=img_gt, t=t, noise=noise, distill_t_frac=-1)
 
         elif noise_scheme == 'almost_pure_noise':
@@ -1091,7 +1091,7 @@ class GaussianDiffusion(nn.Module):
 
         if self.cls_guide_type != 'none':
             if self.cls_guide_type == 'single':
-                loss_cls_guide = self.calc_cls_guide_loss(x_start, x_orig, classes)
+                loss_cls_guide = self.calc_cls_single_loss(x_start, x_orig, classes)
             elif self.cls_guide_type == 'interp':
                 loss_cls_guide = self.calc_cls_interp_loss(x_start, x_orig, classes)
         else:

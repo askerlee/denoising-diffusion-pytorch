@@ -327,7 +327,7 @@ diffusion = GaussianDiffusion(
     num_timesteps = args.num_timesteps, # number of maximum diffusion steps
     alpha_beta_schedule = args.alpha_beta_schedule, # alpha/beta schedule
     loss_type = args.loss_type,         # L1, L2, lap (Laplacian)
-    consist_loss_type = args.consist_loss_type,  # cosine, L1
+    consist_loss_type = args.consist_loss_type,  # L1 (default), cosine.
     objective = args.objective_type,    # objective type, pred_noise or pred_x0
     # if do distillation and featnet_type=='mini', use a miniature of original images as privileged information to train the teacher model.
     # if do distillation and featnet_type=='resnet34' or another model name, 
