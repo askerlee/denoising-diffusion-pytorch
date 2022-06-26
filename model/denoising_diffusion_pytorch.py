@@ -11,7 +11,8 @@ import timm
 from einops import rearrange
 from .laplacian import LapLoss
 from .utils import timm_extract_features, print0, exists, exists_add, repeat_interleave, \
-                   default, normalize_to_neg_one_to_one, unnormalize_to_zero_to_one, SimpleDataset
+                   default, normalize_to_neg_one_to_one, unnormalize_to_zero_to_one, unnorm_save_image, \
+                   SimpleDataset
 import os
 
 timm_model2dim = { 'resnet34': 512,
@@ -858,16 +859,16 @@ class GaussianDiffusion(nn.Module):
             output_dir = f'{self.output_dir}/interp'
             os.makedirs(output_dir, exist_ok=True)
             img_gtaug_save_path  = f'{output_dir}/{self.iter_count}-{local_rank}-aug.png'
-            utils.save_image(img_gt,   img_gtaug_save_path,  nrow = 8)
+            unnorm_save_image(img_gt,   img_gtaug_save_path,  nrow = 8)
             img_gtorig_save_path = f'{output_dir}/{self.iter_count}-{local_rank}-orig.png'
-            utils.save_image(img_orig, img_gtorig_save_path, nrow = 8)
+            unnorm_save_image(img_orig, img_gtorig_save_path, nrow = 8)
 
             #print("GT images for interpolation are saved to", img_gt_save_path)
             img_noisy_save_path = f'{output_dir}/{self.iter_count}-{local_rank}-noisy.png'
-            utils.save_image(img_noisy_interp, img_noisy_save_path, nrow = 8)
+            unnorm_save_image(img_noisy_interp, img_noisy_save_path, nrow = 8)
             #print("Noisy images for interpolation are saved to", img_noisy_save_path)
             img_pred_save_path  = f'{output_dir}/{self.iter_count}-{local_rank}-pred.png'
-            utils.save_image(img_stu_pred, img_pred_save_path, nrow = 8)
+            unnorm_save_image(img_stu_pred, img_pred_save_path, nrow = 8)
             #print("Predicted images are saved to", img_pred_save_path)
 
         feat_interp = self.denoise_fn.extract_pre_feat(self.denoise_fn.consistency_feat_ext, img_stu_pred, ref_shape=None, 
@@ -944,16 +945,16 @@ class GaussianDiffusion(nn.Module):
             os.makedirs(output_dir, exist_ok=True)
 
             img_gtaug_save_path  = f'{output_dir}/{self.iter_count}-{local_rank}-aug.png'
-            utils.save_image(img_gt,   img_gtaug_save_path,  nrow = 8)
+            unnorm_save_image(img_gt,   img_gtaug_save_path,  nrow = 8)
             img_gtorig_save_path = f'{output_dir}/{self.iter_count}-{local_rank}-orig.png'
-            utils.save_image(img_orig, img_gtorig_save_path, nrow = 8)
+            unnorm_save_image(img_orig, img_gtorig_save_path, nrow = 8)
 
             #print("GT images for single-image class guidance are saved to", img_gt_save_path)
             img_noisy_save_path = f'{output_dir}/{self.iter_count}-{local_rank}-noisy.png'
-            utils.save_image(img_noisy, img_noisy_save_path, nrow = 8)
+            unnorm_save_image(img_noisy, img_noisy_save_path, nrow = 8)
             #print("Noisy images for single-image class guidance are saved to", img_noisy_save_path)
             img_pred_save_path  = f'{output_dir}/{self.iter_count}-{local_rank}-pred.png'
-            utils.save_image(img_stu_pred, img_pred_save_path, nrow = 8)
+            unnorm_save_image(img_stu_pred, img_pred_save_path, nrow = 8)
             #print("Predicted images are saved to", img_pred_save_path)
 
         feat_stu = self.denoise_fn.extract_pre_feat(self.denoise_fn.consistency_feat_ext, img_stu_pred, ref_shape=None, 
@@ -1054,9 +1055,9 @@ class GaussianDiffusion(nn.Module):
             x, x_tea = x_noisy
 
         if self.debug and self.iter_count < 10:
-            utils.save_image(x, f'{self.output_dir}/{self.iter_count}-stu.png')
+            unnorm_save_image(x, f'{self.output_dir}/{self.iter_count}-stu.png')
             if exists(x_tea):
-                utils.save_image(x_tea, f'{self.output_dir}/{self.iter_count}-tea.png')
+                unnorm_save_image(x_tea, f'{self.output_dir}/{self.iter_count}-tea.png')
 
         model_output_dict    = self.denoise_fn(x, t, classes=classes, img_tea=x_tea)
         pred_stu, pred_tea   = model_output_dict['pred_stu'],   model_output_dict['pred_tea']
