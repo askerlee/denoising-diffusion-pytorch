@@ -11,6 +11,7 @@ from einops import rearrange
 from .laplacian import LapLoss
 from .utils import timm_extract_features, print0, exists, exists_add, repeat_interleave, \
                    default, normalize_to_neg_one_to_one, unnormalize_to_zero_to_one, SimpleDataset
+import os
 
 timm_model2dim = { 'resnet34': 512,
                    'resnet18': 512,
@@ -603,6 +604,7 @@ class GaussianDiffusion(nn.Module):
         self.debug = debug
         self.num_timesteps      = num_timesteps
         self.alpha_beta_schedule = alpha_beta_schedule
+        self.iter_count = 0
 
         # Sampling uses independent noises and random seeds from training.
         old_rng_state = torch.get_rng_state()
@@ -770,7 +772,7 @@ class GaussianDiffusion(nn.Module):
         return img
 
     def calc_cls_interp_loss(self, img_gt, classes, min_interp_w = 0., min_before_weight=True,
-                             noise_scheme='large_t'):
+                             noise_scheme='larger_t'):
         assert self.cls_embed_type != 'none' and exists(classes)
 
         b, device = img_gt.shape[0], img_gt.device
@@ -789,7 +791,7 @@ class GaussianDiffusion(nn.Module):
             # Replace the second half of img_gt with randomly sampled images 
             # that are of the same classes as img_gt1.
             img_gt          = torch.cat([img_gt1, img_gt2], dim=0)
-            
+
         feat_gt = self.denoise_fn.extract_pre_feat(self.denoise_fn.consistency_feat_ext, img_gt, ref_shape=None, 
                                                    has_grad=True, use_head_feat=self.consistency_use_head_feat)        
         feat_gt1, feat_gt2  = feat_gt[:b2], feat_gt[b2:]
@@ -804,7 +806,7 @@ class GaussianDiffusion(nn.Module):
             t2 = torch.full((b2, ), self.num_timesteps - 1, device=device, dtype=torch.long)
             img_noisy_interp = noise[:b2]
 
-        elif noise_scheme == 'large_t':
+        elif noise_scheme == 'larger_t':
             # Only use the largest 1/4 of possible t values to inject noises.
             t2 = torch.randint(int(self.num_timesteps * 0.75), self.num_timesteps, (b2, ), device=device).long()
             t  = t2.repeat(2)
@@ -823,6 +825,16 @@ class GaussianDiffusion(nn.Module):
             img_noisy       = x_start_weight * img_gt + noise_weight * noise
             img_noisy1, img_noisy2 = img_noisy[:b2], img_noisy[b2:]
             img_noisy_interp = w * img_noisy1 + (1 - w) * img_noisy2
+
+        if self.iter_count == 0:
+            local_rank = int(os.environ.get('LOCAL_RANK', 0))
+            if local_rank <= 0:
+                img_gt_save_path = f'{self.output_dir}/gt-interp.png'
+                utils.save_image(img_gt, img_gt_save_path, nrow = 8)
+                print("A batch of gt images for interpolation is saved to", img_gt_save_path)
+                img_noisy_save_path = f'{self.output_dir}/noisy-interp.png'
+                utils.save_image(img_noisy, img_noisy_save_path, nrow = 8)
+                print("A batch of noisy images for interpolation is saved to", img_noisy_save_path)
 
         # Embeddings of the first and second halves are the same. 
         # No need to do interpolation on class embedding.
@@ -915,7 +927,7 @@ class GaussianDiffusion(nn.Module):
         return loss_cls_guide
 
     # inject random noise into x_start. sqrt_one_minus_alphas_cumprod_t is the std of the noise.
-    def q_sample(self, x_start, t, noise=None, distill_t_frac=-1, iter_count=-1):
+    def q_sample(self, x_start, t, noise=None, distill_t_frac=-1):
         assert distill_t_frac <= 1
 
         noise = default(noise, lambda: torch.randn_like(x_start))
@@ -927,9 +939,9 @@ class GaussianDiffusion(nn.Module):
         noise_weight    = torch.sqrt(1 - alphas_cumprod)
         x_noisy1 = x_start_weight * x_start + noise_weight * noise
 
-        if self.debug and iter_count >=0 and iter_count < 10:
-            print0(f'{iter_count} x_start_weight\n{x_start_weight.flatten()}')
-            print0(f'{iter_count} noise_weight\n{noise_weight.flatten()}')
+        if self.debug and self.iter_count >=0 and self.iter_count < 10:
+            print0(f'{self.iter_count} x_start_weight\n{x_start_weight.flatten()}')
+            print0(f'{self.iter_count} noise_weight\n{noise_weight.flatten()}')
 
         # Conventional sampling. Do not sample for an easier t.
         if distill_t_frac == -1:
@@ -947,9 +959,9 @@ class GaussianDiffusion(nn.Module):
                 noise_weight2   = torch.sqrt(1 - alphas_cumprod2)
                 x_noisy2 = x_start_weight2 * x_start + noise_weight2 * noise
 
-                if self.debug and iter_count >=0 and iter_count < 10:
-                    print0(f'{iter_count} x_start_weight2\n{x_start_weight2.flatten()}')
-                    print0(f'{iter_count} noise_weight2\n{noise_weight2.flatten()}')
+                if self.debug and self.iter_count >=0 and self.iter_count < 10:
+                    print0(f'{self.iter_count} x_start_weight2\n{x_start_weight2.flatten()}')
+                    print0(f'{self.iter_count} noise_weight2\n{noise_weight2.flatten()}')
 
             return x_noisy1, x_noisy2
 
@@ -991,13 +1003,13 @@ class GaussianDiffusion(nn.Module):
             raise ValueError(f'invalid consistency loss type {self.consist_loss_type}')
 
     # x_start: initial image.
-    def p_losses(self, x_start, t, classes, noise = None, iter_count=0):
+    def p_losses(self, x_start, t, classes, noise = None):
         b, c, h, w = x_start.shape
         # noise: a Gaussian noise for each pixel.
         noise = default(noise, lambda: torch.randn_like(x_start))
 
         x_noisy = self.q_sample(x_start=x_start, t=t, noise=noise, 
-                                distill_t_frac=self.distill_t_frac, iter_count=iter_count)
+                                distill_t_frac=self.distill_t_frac)
         # Sample an easier x2 according to a smaller t.
         if self.distill_t_frac == -1:
             x       = x_noisy
@@ -1005,10 +1017,10 @@ class GaussianDiffusion(nn.Module):
         else:
             x, x_tea = x_noisy
 
-        if self.debug and iter_count < 10:
-            utils.save_image(x, f'{self.output_dir}/{iter_count}-stu.png')
+        if self.debug and self.iter_count < 10:
+            utils.save_image(x, f'{self.output_dir}/{self.iter_count}-stu.png')
             if exists(x_tea):
-                utils.save_image(x_tea, f'{self.output_dir}/{iter_count}-tea.png')
+                utils.save_image(x_tea, f'{self.output_dir}/{self.iter_count}-tea.png')
 
         model_output_dict    = self.denoise_fn(x, t, classes=classes, img_tea=x_tea)
         pred_stu, pred_tea   = model_output_dict['pred_stu'],   model_output_dict['pred_tea']
@@ -1057,7 +1069,8 @@ class GaussianDiffusion(nn.Module):
             loss = loss / loss.item()
         return { 'loss': loss, 'loss_stu': loss_stu, 'loss_tea': loss_tea, 'loss_cls_guide': loss_cls_guide }
 
-    def forward(self, img, classes, *args, **kwargs):
+    def forward(self, img, classes, iter_count, *args, **kwargs):
+        self.iter_count = iter_count
         b, c, h, w, device, img_size, = *img.shape, img.device, self.image_size
         if not (h == img_size and w == img_size):
             print0(f'height and width of image must be {img_size}')
