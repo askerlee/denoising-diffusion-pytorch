@@ -793,6 +793,7 @@ class GaussianDiffusion(nn.Module):
             # and scale it down to 0.01. (0.1 after sqrt)
             alpha_cumprod = self.alphas_cumprod[-2] * 0.01
             alphas_cumprod = torch.full((b, ), alpha_cumprod, device=device, dtype=img_gt.dtype)
+            alphas_cumprod = alphas_cumprod.view(b, *((1,) * (len(img_gt.shape) - 1)))
             x_start_weight  = torch.sqrt(alphas_cumprod)
             noise_weight    = torch.sqrt(1 - alphas_cumprod)
             img_noisy       = x_start_weight * img_gt + noise_weight * noise
@@ -857,6 +858,7 @@ class GaussianDiffusion(nn.Module):
             # and scale it down to 0.01. (0.1 after sqrt)
             alpha_cumprod = self.alphas_cumprod[-2] * 0.01
             alphas_cumprod = torch.full((b, ), alpha_cumprod, device=device, dtype=img_gt.dtype)
+            alphas_cumprod = alphas_cumprod.view(b, *((1,) * (len(img_gt.shape) - 1)))
             x_start_weight  = torch.sqrt(alphas_cumprod)
             noise_weight    = torch.sqrt(1 - alphas_cumprod)
             img_noisy       = x_start_weight * img_gt + noise_weight * noise
