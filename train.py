@@ -215,7 +215,7 @@ parser.add_argument('--noamp', dest='amp', default=True, action='store_false', h
 parser.add_argument('--ds', type=str, default='imagenet', help="The path of training dataset")
 parser.add_argument('--saveimg', dest='sample_dir', type=str, default='samples', 
                     help="The path to save sampled images")
-parser.add_argument('--savecp',  dest='checkpoints_folder', type=str, default='checkpoints', 
+parser.add_argument('--savecp',  dest='cp_dir', type=str, default='checkpoints', 
                     help="The path to save checkpoints")
 
 parser.add_argument('--times', dest='num_timesteps', type=int, default=1000, 
