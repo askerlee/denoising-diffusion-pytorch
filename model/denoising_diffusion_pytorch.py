@@ -797,7 +797,7 @@ class GaussianDiffusion(nn.Module):
             x_start_weight  = torch.sqrt(alphas_cumprod)
             noise_weight    = torch.sqrt(1 - alphas_cumprod)
             img_noisy       = x_start_weight * img_gt + noise_weight * noise
-            img_noisy1, img_noisy2 = img_noisy[:b2], img_noisy2[b2:]
+            img_noisy1, img_noisy2 = img_noisy[:b2], img_noisy[b2:]
             img_noisy_interp = w * img_noisy1 + (1 - w) * img_noisy2
 
         cls_embed = self.denoise_fn.cls_embedding(classes)
