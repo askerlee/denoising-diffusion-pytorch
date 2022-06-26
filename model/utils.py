@@ -123,7 +123,7 @@ class BaseDataset(data.Dataset):
                     )),
                     iaa.Sometimes(perspect_prob, 
                                   iaa.PerspectiveTransform(scale=(0.01, 0.15), cval=(0,255), mode='constant')), 
-                    iaa.Sometimes(0.3, iaa.GammaContrast((0.7, 1.7))),    # Gamma contrast degrades?
+                    # iaa.Sometimes(0.3, iaa.GammaContrast((0.7, 1.7))),    # Gamma contrast degrades?
                     # When tgt_width==tgt_height, PadToFixedSize and CropToFixedSize are unnecessary.
                     # Otherwise, we have to take care if the longer edge is rotated to the shorter edge.
                     # iaa.PadToFixedSize(width=tgt_width,  height=tgt_height),

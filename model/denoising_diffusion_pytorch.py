@@ -1,3 +1,4 @@
+from doctest import NORMALIZE_WHITESPACE
 import math
 import torch
 from torch import nn, einsum
@@ -795,7 +796,7 @@ class GaussianDiffusion(nn.Module):
             img_orig2       = img_gt2_dict['img_orig'].cuda()
             img_orig        = torch.cat([img_orig1, img_orig2], dim=0)
             classes         = classes1.repeat(2)
-            
+
         feat_gt = self.denoise_fn.extract_pre_feat(self.denoise_fn.consistency_feat_ext, img_gt, ref_shape=None, 
                                                    has_grad=True, use_head_feat=self.consistency_use_head_feat)        
         feat_gt1, feat_gt2  = feat_gt[:b2], feat_gt[b2:]
@@ -891,29 +892,33 @@ class GaussianDiffusion(nn.Module):
 
         return loss_interp
 
-    def calc_cls_guide_loss(self, img_gt, img_orig, classes, from_pure_noise=False):
+    def calc_cls_guide_loss(self, img_gt, img_orig, classes, noise_scheme='larger_t'):
         assert self.cls_embed_type != 'none' and exists(classes)
 
         b, device = img_gt.shape[0], img_gt.device
         feat_gt = self.denoise_fn.extract_pre_feat(self.denoise_fn.consistency_feat_ext, img_gt, ref_shape=None, 
                                                    has_grad=True, use_head_feat=self.consistency_use_head_feat)        
-        # t = torch.randint(0, self.num_timesteps, (b, ), device=device).long()
-        t = torch.full((b, ), self.num_timesteps - 1, device=device, dtype=torch.long)
         noise = torch.randn_like(img_gt)
 
-        if from_pure_noise:
-            img_noisy = noise   # Pure noise
-        else:
-            # self.alphas_cumprod[-1] = 0. So take -2 as the minimal alpha_cumprod, 
-            alpha_cumprod = self.alphas_cumprod[-2] #* 0.1
-            alphas_cumprod = torch.full((b, ), alpha_cumprod, device=device, dtype=img_gt.dtype)
-            alphas_cumprod = alphas_cumprod.view(b, *((1,) * (len(img_gt.shape) - 1)))
+        if noise_scheme == 'pure_noise':
+            t = torch.full((b, ), self.num_timesteps - 1, device=device, dtype=torch.long)
+            img_noisy = noise
+
+        elif noise_scheme == 'larger_t':
+            # Only use the largest 1/4 of possible t values to inject noises.
+            t = torch.randint(int(self.num_timesteps * 0.75), self.num_timesteps, (b, ), device=device).long()
+            img_noisy = self.q_sample(x_start=img_gt, t=t, noise=noise, distill_t_frac=-1)
+
+        elif noise_scheme == 'almost_pure_noise':
+            t = torch.full((b, ), self.num_timesteps - 1, device=device, dtype=torch.long)
+            # self.alphas_cumprod[-1] = 0. So take -2 as the minimal alpha_cumprod, and scale it by 0.1.
+            alpha_cumprod   = self.alphas_cumprod[-2] * 0.1
+            alphas_cumprod  = torch.full((b, ), alpha_cumprod, device=device, dtype=img_gt.dtype)
+            alphas_cumprod  = alphas_cumprod.view(b, *((1,) * (len(img_gt.shape) - 1)))
             x_start_weight  = torch.sqrt(alphas_cumprod)
             noise_weight    = torch.sqrt(1 - alphas_cumprod)
             img_noisy       = x_start_weight * img_gt + noise_weight * noise
 
-        # img_noisy = self.q_sample(x_start=img_gt, t=t, noise=noise)
-        img_noisy = noise   # Pure noise
         cls_embed = self.denoise_fn.cls_embedding(classes)
         cls_embed = cls_embed.view(b, *((1,) * (len(img_noisy.shape) - 2)), -1)
 
@@ -928,7 +933,22 @@ class GaussianDiffusion(nn.Module):
             # img_stu_pred is the predicted noises. Subtract it from img_noisy to get the predicted image.
             img_stu_pred = self.predict_start_from_noise(img_noisy, t, img_stu_pred)
         # otherwise, objective is 'pred_x0', and img_stu_pred is already the predicted image.
-            
+
+        if self.iter_count % 1000 == 0:
+            local_rank = int(os.environ.get('LOCAL_RANK', 0))
+            img_gtaug_save_path = f'{self.output_dir}/single-gtaug-{self.iter_count}-{local_rank}.png'
+            utils.save_image(img_gt,   img_gtaug_save_path,  nrow = 8)
+            img_gtorig_save_path = f'{self.output_dir}/single-gtorig-{self.iter_count}-{local_rank}.png'
+            utils.save_image(img_orig, img_gtorig_save_path, nrow = 8)
+
+            #print("GT images for single-image class guidance are saved to", img_gt_save_path)
+            img_noisy_save_path = f'{self.output_dir}/single-noisy-{self.iter_count}-{local_rank}.png'
+            utils.save_image(img_noisy, img_noisy_save_path, nrow = 8)
+            #print("Noisy images for single-image class guidance are saved to", img_noisy_save_path)
+            img_pred_save_path = f'{self.output_dir}/single-pred-{self.iter_count}-{local_rank}.png'
+            utils.save_image(img_stu_pred, img_pred_save_path, nrow = 8)
+            #print("Predicted images are saved to", img_pred_save_path)
+
         feat_stu = self.denoise_fn.extract_pre_feat(self.denoise_fn.consistency_feat_ext, img_stu_pred, ref_shape=None, 
                                                      has_grad=True, use_head_feat=self.consistency_use_head_feat)
 
