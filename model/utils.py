@@ -175,8 +175,8 @@ class BaseDataset(data.Dataset):
             images['cls'].append(image['cls'])
 
         images['img'] = torch.stack(images['img'])
-        images['cls'] = torch.stack(images['cls'])
-        
+        images['cls'] = torch.tensor(images['cls'])
+
         return images
 
 def aspect_preserving_resize(image, min_size=128):
