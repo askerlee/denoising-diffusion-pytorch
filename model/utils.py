@@ -174,8 +174,9 @@ class BaseDataset(data.Dataset):
             image = self.__getitem__(img_idx)
             images['img'].append(image['img'])
             images['cls'].append(image['cls'])
-
+            images['img_orig'].append(image['img_orig'])
         images['img'] = torch.stack(images['img'])
+        images['img_orig'] = torch.stack(images['img_orig'])
         images['cls'] = torch.tensor(images['cls'])
 
         return images

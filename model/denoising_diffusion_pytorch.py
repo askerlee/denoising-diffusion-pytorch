@@ -791,7 +791,11 @@ class GaussianDiffusion(nn.Module):
             # Replace the second half of img_gt with randomly sampled images 
             # that are of the same classes as img_gt1.
             img_gt          = torch.cat([img_gt1, img_gt2], dim=0)
-
+            img_orig1       = img_orig[:b2]
+            img_orig2       = img_gt2_dict['img_orig'].cuda()
+            img_orig        = torch.cat([img_orig1, img_orig2], dim=0)
+            classes         = classes1.repeat(2)
+            
         feat_gt = self.denoise_fn.extract_pre_feat(self.denoise_fn.consistency_feat_ext, img_gt, ref_shape=None, 
                                                    has_grad=True, use_head_feat=self.consistency_use_head_feat)        
         feat_gt1, feat_gt2  = feat_gt[:b2], feat_gt[b2:]
