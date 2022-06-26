@@ -860,8 +860,8 @@ class GaussianDiffusion(nn.Module):
             os.makedirs(output_dir, exist_ok=True)
             img_gtaug_save_path  = f'{output_dir}/{self.iter_count}-{local_rank}-aug.png'
             unnorm_save_image(img_gt,   img_gtaug_save_path,  nrow = 8)
-            img_gtorig_save_path = f'{output_dir}/{self.iter_count}-{local_rank}-orig.png'
-            unnorm_save_image(img_orig, img_gtorig_save_path, nrow = 8)
+            #img_gtorig_save_path = f'{output_dir}/{self.iter_count}-{local_rank}-orig.png'
+            #unnorm_save_image(img_orig, img_gtorig_save_path, nrow = 8)
 
             #print("GT images for interpolation are saved to", img_gt_save_path)
             img_noisy_save_path = f'{output_dir}/{self.iter_count}-{local_rank}-noisy.png'
@@ -946,8 +946,8 @@ class GaussianDiffusion(nn.Module):
 
             img_gtaug_save_path  = f'{output_dir}/{self.iter_count}-{local_rank}-aug.png'
             unnorm_save_image(img_gt,   img_gtaug_save_path,  nrow = 8)
-            img_gtorig_save_path = f'{output_dir}/{self.iter_count}-{local_rank}-orig.png'
-            unnorm_save_image(img_orig, img_gtorig_save_path, nrow = 8)
+            #img_gtorig_save_path = f'{output_dir}/{self.iter_count}-{local_rank}-orig.png'
+            #unnorm_save_image(img_orig, img_gtorig_save_path, nrow = 8)
 
             #print("GT images for single-image class guidance are saved to", img_gt_save_path)
             img_noisy_save_path = f'{output_dir}/{self.iter_count}-{local_rank}-noisy.png'
