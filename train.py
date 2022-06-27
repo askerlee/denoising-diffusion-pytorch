@@ -238,7 +238,7 @@ parser.add_argument('--featnet', dest='featnet_type',
                               'mobilenetv2_120d', 'vit_base_patch8_224', 'vit_tiny_patch16_224' ], 
                     default='vit_tiny_patch16_224', 
                     help='Type of the feature network. Used by the distillation and interpolation losses.')
-parser.add_argument('--distill', dest='distillation_type', choices=['none', 'tfrac'], default='none', 
+parser.add_argument('--distill', dest='distillation_type', choices=['none', 'tfrac'], default='tfrac', 
                     help='Distillation type')
 parser.add_argument('--dtfrac', dest='distill_t_frac', default=0.8, type=float, 
                     help='Fraction of t of noise to be added to teacher images '
