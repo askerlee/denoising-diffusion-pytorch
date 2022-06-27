@@ -456,7 +456,7 @@ class Unet(nn.Module):
         # Always fine-tune the student feature extractor.
             noise_feat = self.extract_pre_feat(self.dist_feat_ext_stu, init_noise, 
                                                mid_feat.shape[2:], 
-                                               has_grad=True)
+                                               has_grad=True, use_head_feat=False)
         else:
             noise_feat = None
 
@@ -480,7 +480,7 @@ class Unet(nn.Module):
             # finetune_tea_feat_ext controls whether to fine-tune the teacher feature extractor.
             tea_feat = self.extract_pre_feat(self.dist_feat_ext_tea, img_tea, 
                                              mid_feat.shape[2:], 
-                                             has_grad=self.finetune_tea_feat_ext)
+                                             has_grad=True, use_head_feat=False)
         else:
             tea_feat = None
 
