@@ -229,7 +229,7 @@ class LabeledDataset(BaseDataset):
         # named as 0, ..., n-1. For example, 102flowers has labels 1, ..., 102.
         # So we need to map the original labels to 0, ..., n-1.
         cls2indices = {}
-        for k, v in self.index2cls.items():
+        for k, v in enumerate(self.index2cls):
             cls2indices[v] = cls2indices.setdefault(v, []).append(k)
 
         # Map the original labels to 0, ..., n-1.
