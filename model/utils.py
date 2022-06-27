@@ -233,7 +233,7 @@ class LabeledDataset(BaseDataset):
             cls2indices[v] = cls2indices.get(v, []) + [k]
 
         # Map the original labels to 0, ..., n-1.
-        cls_mapping = { k: v for k, v in enumerate(sorted(cls2indices.keys())) }
+        cls_mapping = { v: k for k, v in enumerate(sorted(cls2indices.keys())) }
         self.cls2indices = { cls_mapping[k]: v for k, v in sorted(cls2indices.items()) }
         self.index2cls = [ cls_mapping[k] for k in self.index2cls ]
         print0("Found {} images in {}".format(len(self.paths), root))
