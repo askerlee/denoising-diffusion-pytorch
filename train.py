@@ -199,7 +199,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--seed', type=int, default=1234, help="Random seed for initialization and training")
 parser.add_argument('--sampleseed', type=int, default=5678, help="Random seed for sampling")
 
-parser.add_argument('--lr', type=float, default=2e-4, help="Learning rate")
+parser.add_argument('--lr', type=float, default=4e-4, help="Learning rate")
 parser.add_argument('--bs', dest='batch_size', type=int, default=32, help="Batch size")
 parser.add_argument('--cp', type=str, dest='cp_path', default=None, help="The path of a model checkpoint")
 parser.add_argument('--sample', dest='sample_only', action='store_true', help='Do sampling using a trained model')
@@ -219,10 +219,10 @@ parser.add_argument('--savecp',  dest='cp_dir', type=str, default='checkpoints',
 
 parser.add_argument('--times', dest='num_timesteps', type=int, default=1000, 
                     help="Number of maximum diffusion steps")
-parser.add_argument('--mem', dest='memory_size', type=int, default=1024, 
+parser.add_argument('--mem', dest='memory_size', type=int, default=2048, 
                     help="Number of memory cells in each attention layer")
-parser.add_argument('--sched', dest='alpha_beta_schedule', type=str, choices=['cosb', 'lina', 'linb'], default='linb', 
-                    help="Type of alpha/beta schedule")
+parser.add_argument('--sched', dest='alpha_beta_schedule', type=str, choices=['cosb', 'lina', 'linb'], 
+                    default='lina', help="Type of alpha/beta schedule")
 
 parser.add_argument('--losstype', dest='loss_type', type=str, choices=['l1', 'l2', 'lap'], default='l1', 
                     help="Type of image denoising loss")
@@ -245,7 +245,7 @@ parser.add_argument('--dtfrac', dest='distill_t_frac', default=0.8, type=float,
                          '(the smaller, the less noise is added to groundtruth images)')                          
 parser.add_argument('--tuneteacher', dest='finetune_tea_feat_ext', default=False, action='store_true', 
                     help='Fine-tune the pretrained image feature extractor of the teacher model (default: freeze it).')
-parser.add_argument('--alignfeat', dest='align_tea_stu_feat_weight', default=0.0, type=float, 
+parser.add_argument('--alignfeat', dest='align_tea_stu_feat_weight', default=0.001, type=float, 
                     help='Align the features of the feature extractors of the teacher and the student. '
                     'Default: 0.0, meaning no alignment.')
 parser.add_argument('--clsembed', dest='cls_embed_type', choices=['none', 'tea_stu'], default='tea_stu', 
