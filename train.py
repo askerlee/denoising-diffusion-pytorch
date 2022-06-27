@@ -248,7 +248,7 @@ parser.add_argument('--tuneteacher', dest='finetune_tea_feat_ext', default=False
 parser.add_argument('--alignfeat', dest='align_tea_stu_feat_weight', default=0.0, type=float, 
                     help='Align the features of the feature extractors of the teacher and the student. '
                     'Default: 0.0, meaning no alignment.')
-parser.add_argument('--clsembed', dest='cls_embed_type', choices=['none', 'tea_stu'], default='none', 
+parser.add_argument('--clsembed', dest='cls_embed_type', choices=['none', 'tea_stu'], default='tea_stu', 
                     help='How class embedding is incorporated in the student and teacher')
 parser.add_argument('--clsguide', dest='cls_guide_type', choices=['none', 'single', 'interp'], default='single', 
                     help='The type of class guidance: none, single (one class only), '
