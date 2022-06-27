@@ -222,18 +222,20 @@ class LabeledDataset(BaseDataset):
             lines = f.readlines()
             # ** We assume the labels are sorted by image filenames as in self.paths. **
             # index2cls: one-to-one mapping.
-            self.index2cls = [ int(line.strip()) for line in lines ]
+            index2cls = [ int(line.strip()) for line in lines ]
 
         self.paths = [ p for ext in exts for p in sorted(Path(f'{root}').glob(f'**/*.{ext}')) ]
         # Each class maps to a list of image indices. However, the original labels may not be
         # named as 0, ..., n-1. For example, 102flowers has labels 1, ..., 102.
         # So we need to map the original labels to 0, ..., n-1.
         cls2indices = {}
-        for k, v in enumerate(self.index2cls):
+        for k, v in enumerate(index2cls):
             cls2indices[v] = cls2indices.get(v, []) + [k]
 
         # Map the original labels to 0, ..., n-1.
-        self.cls2indices = { i: v for i, (k, v) in enumerate(sorted(cls2indices.items())) }
+        cls_mapping = { k: v for k, v in enumerate(sorted(cls2indices.keys())) }
+        self.cls2indices = { cls_mapping[k]: v for k, v in sorted(cls2indices.items()) }
+        self.index2cls = [ cls_mapping[k] for k in self.index2cls ]
         print0("Found {} images in {}".format(len(self.paths), root))
 
 class Imagenet(BaseDataset):
