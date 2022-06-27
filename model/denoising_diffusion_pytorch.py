@@ -902,31 +902,36 @@ class GaussianDiffusion(nn.Module):
         assert self.cls_embed_type != 'none' and exists(classes)
 
         b, device = img_gt.shape[0], img_gt.device
-        feat_gt = self.denoise_fn.extract_pre_feat(self.denoise_fn.consistency_feat_ext, img_gt, ref_shape=None, 
+        assert b % 2 == 0
+        b2 = b // 2
+        img_gt2 = img_gt[:b2]
+        classes2 = classes[:b2]
+
+        feat_gt = self.denoise_fn.extract_pre_feat(self.denoise_fn.consistency_feat_ext, img_gt2, ref_shape=None, 
                                                    has_grad=True, use_head_feat=self.consistency_use_head_feat)        
-        noise = torch.randn_like(img_gt)
+        noise = torch.randn_like(img_gt2)
 
         if noise_scheme == 'pure_noise':
-            t = torch.full((b, ), self.num_timesteps - 1, device=device, dtype=torch.long)
+            t = torch.full((b2, ), self.num_timesteps - 1, device=device, dtype=torch.long)
             img_noisy = noise
 
         elif noise_scheme == 'larger_t':
             # Only use the largest 1/10 of possible t values to inject noises.
-            t = torch.randint(int(self.num_timesteps * min_t_percentile), self.num_timesteps, (b, ), device=device).long()
-            img_noisy = self.q_sample(x_start=img_gt, t=t, noise=noise, distill_t_frac=-1)
+            t = torch.randint(int(self.num_timesteps * min_t_percentile), self.num_timesteps, (b2, ), device=device).long()
+            img_noisy = self.q_sample(x_start=img_gt2, t=t, noise=noise, distill_t_frac=-1)
 
         elif noise_scheme == 'almost_pure_noise':
-            t = torch.full((b, ), self.num_timesteps - 1, device=device, dtype=torch.long)
+            t = torch.full((b2, ), self.num_timesteps - 1, device=device, dtype=torch.long)
             # self.alphas_cumprod[-1] = 0. So take -2 as the minimal alpha_cumprod, and scale it by 0.1.
             alpha_cumprod   = self.alphas_cumprod[-2] * 0.1
-            alphas_cumprod  = torch.full((b, ), alpha_cumprod, device=device, dtype=img_gt.dtype)
-            alphas_cumprod  = alphas_cumprod.view(b, *((1,) * (len(img_gt.shape) - 1)))
+            alphas_cumprod  = torch.full((b2, ), alpha_cumprod, device=device, dtype=img_gt.dtype)
+            alphas_cumprod  = alphas_cumprod.view(b2, *((1,) * (len(img_gt.shape) - 1)))
             x_start_weight  = torch.sqrt(alphas_cumprod)
             noise_weight    = torch.sqrt(1 - alphas_cumprod)
-            img_noisy       = x_start_weight * img_gt + noise_weight * noise
+            img_noisy       = x_start_weight * img_gt2 + noise_weight * noise
 
-        cls_embed = self.denoise_fn.cls_embedding(classes)
-        cls_embed = cls_embed.view(b, *((1,) * (len(img_noisy.shape) - 2)), -1)
+        cls_embed = self.denoise_fn.cls_embedding(classes2)
+        cls_embed = cls_embed.view(b2, *((1,) * (len(img_noisy.shape) - 2)), -1)
 
         # Set img_tea to None, so that teacher module won't be executed and trained, 
         # to reduce unnecessary compute.
@@ -947,7 +952,7 @@ class GaussianDiffusion(nn.Module):
                 os.makedirs(sample_dir, exist_ok=True)
 
                 img_gtaug_save_path  = f'{sample_dir}/{self.iter_count}-{local_rank}-aug.png'
-                unnorm_save_image(img_gt,   img_gtaug_save_path,  nrow = 8)
+                unnorm_save_image(img_gt2,   img_gtaug_save_path,  nrow = 8)
                 #img_gtorig_save_path = f'{sample_dir}/{self.iter_count}-{local_rank}-orig.png'
                 #unnorm_save_image(img_orig, img_gtorig_save_path, nrow = 8)
 
