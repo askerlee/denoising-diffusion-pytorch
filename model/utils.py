@@ -230,7 +230,7 @@ class LabeledDataset(BaseDataset):
         # So we need to map the original labels to 0, ..., n-1.
         cls2indices = {}
         for k, v in enumerate(self.index2cls):
-            cls2indices[v] = cls2indices.setdefault(v, []).append(k)
+            cls2indices[v] = cls2indices.get(v, []) + [k]
 
         # Map the original labels to 0, ..., n-1.
         self.cls2indices = { i: v for i, (k, v) in enumerate(sorted(cls2indices.items())) }
