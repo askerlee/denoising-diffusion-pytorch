@@ -1,5 +1,5 @@
-from model import Unet, GaussianDiffusion, EMA, SimpleDataset, Imagenet, \
-                  cycle, DistributedDataParallelPassthrough, \
+from model import Unet, GaussianDiffusion, UnlabeledDataset, LabeledDataset, Imagenet, \
+                  EMA, cycle, DistributedDataParallelPassthrough, \
                   sample_images, AverageMeters, print0, reduce_tensor
 import argparse
 import torch
@@ -301,8 +301,11 @@ if args.ds == 'imagenet':
         dataset.training = False
         dataset.save_example("imagenet128-examples")
         exit(0)
-else:
-    dataset = SimpleDataset(args.ds, image_size=128, do_geo_aug=args.do_geo_aug)
+elif args.ds == '102flower':
+    dataset = LabeledDataset(args.ds, label_file='102flower/102flower_labels.txt', 
+                             image_size=128, do_geo_aug=args.do_geo_aug)
+else:    
+    dataset = UnlabeledDataset(args.ds, image_size=128, do_geo_aug=args.do_geo_aug)
 
 num_classes = dataset.get_num_classes()
 

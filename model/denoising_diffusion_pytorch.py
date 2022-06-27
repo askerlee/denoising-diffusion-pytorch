@@ -12,7 +12,7 @@ from einops import rearrange
 from .laplacian import LapLoss
 from .utils import timm_extract_features, print0, exists, exists_add, repeat_interleave, \
                    default, normalize_to_neg_one_to_one, unnormalize_to_zero_to_one, unnorm_save_image, \
-                   SimpleDataset
+                   UnlabeledDataset, LabeledDataset
 import os
 
 timm_model2dim = { 'resnet34': 512,
@@ -782,9 +782,9 @@ class GaussianDiffusion(nn.Module):
         b2 = b // 2
         classes1 = classes[:b2]
 
-        # In SimpleDataset, each image is a class. So we don't have 
+        # In UnlabeledDataset, each image is a class. So we don't have 
         # different same-class images to do interpolation.
-        within_same_class = not isinstance(self.dataset, SimpleDataset)
+        within_same_class = not isinstance(self.dataset, UnlabeledDataset)
 
         if within_same_class:
             img_gt1         = img_gt[:b2]

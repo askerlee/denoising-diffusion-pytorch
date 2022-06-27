@@ -198,10 +198,10 @@ def aspect_preserving_resize(image, min_size=128):
     resized_image = img.resize((new_width, new_height))
     return np.array(resized_image)
 
-class SimpleDataset(BaseDataset):
+class UnlabeledDataset(BaseDataset):
     def __init__(self, root, image_size, exts = ['jpg', 'jpeg', 'png', 'JPEG', 'JPG'], 
                  do_geo_aug=True, training=True):
-        super(SimpleDataset, self).__init__(root, image_size, exts, do_geo_aug, training)
+        super(UnlabeledDataset, self).__init__(root, image_size, exts, do_geo_aug, training)
 
         self.paths = [ p for ext in exts for p in sorted(Path(f'{root}').glob(f'**/*.{ext}')) ]
         # Each class maps to a list of image indices. Since for simple datasets like pokemon,
@@ -211,6 +211,29 @@ class SimpleDataset(BaseDataset):
         self.cls2indices = [ [i] for i in range(len(self.paths)) ]
         # index2cls: one-to-one mapping.
         self.index2cls   = [ i for i in range(len(self.paths)) ]
+        print0("Found {} images in {}".format(len(self.paths), root))
+
+class LabeledDataset(BaseDataset):
+    def __init__(self, root, label_file, image_size, exts = ['jpg', 'jpeg', 'png', 'JPEG', 'JPG'], 
+                 do_geo_aug=True, training=True):
+        super(LabeledDataset, self).__init__(root, image_size, exts, do_geo_aug, training)
+
+        with open(label_file, 'r') as f:
+            lines = f.readlines()
+            # ** We assume the labels are sorted by image filenames as in self.paths. **
+            # index2cls: one-to-one mapping.
+            self.index2cls = [ int(line.strip()) for line in lines ]
+
+        self.paths = [ p for ext in exts for p in sorted(Path(f'{root}').glob(f'**/*.{ext}')) ]
+        # Each class maps to a list of image indices. However, the original labels may not be
+        # named as 0, ..., n-1. For example, 102flowers has labels 1, ..., 102.
+        # So we need to map the original labels to 0, ..., n-1.
+        cls2indices = {}
+        for k, v in self.index2cls.items():
+            cls2indices[v] = cls2indices.setdefault(v, []).append(k)
+
+        # Map the original labels to 0, ..., n-1.
+        self.cls2indices = { i: v for i, (k, v) in enumerate(sorted(cls2indices.items())) }
         print0("Found {} images in {}".format(len(self.paths), root))
 
 class Imagenet(BaseDataset):
