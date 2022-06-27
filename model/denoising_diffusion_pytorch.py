@@ -788,7 +788,7 @@ class GaussianDiffusion(nn.Module):
 
         if within_same_class:
             img_gt1         = img_gt[:b2]
-            img_gt2_dict    = self.dataset.sample_by_labels(classes1)
+            img_gt2_dict    = self.dataset.sample_by_labels(classes1.tolist())
             img_gt2         = img_gt2_dict['img'].cuda()
             img_gt2         = normalize_to_neg_one_to_one(img_gt2)
             # Replace the second half of img_gt with randomly sampled images 
