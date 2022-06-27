@@ -184,9 +184,8 @@ class Trainer(object):
                     self.ema_model.eval()
 
                     milestone = self.step // self.save_and_sample_every
-                    # sample_dir is not a string, but a Path object.
-                    img_save_path = str(self.sample_dir / f'{milestone:03}-sample.png')
-                    nn_save_path  = str(self.sample_dir / f'{milestone:03}-nn.png')
+                    img_save_path = f'{self.sample_dir}/{milestone:03}-sample.png'
+                    nn_save_path  = f'{self.sample_dir}/{milestone:03}-nn.png'
                     self.save(milestone)
                     # self.dataset is provided for nearest neighbor imgae search.
                     sample_images(self.ema_model, 36, 36, self.dataset, img_save_path, nn_save_path)               
