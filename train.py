@@ -302,7 +302,7 @@ if args.ds == 'imagenet':
         dataset.save_example("imagenet128-examples")
         exit(0)
 elif args.ds == '102flowers':
-    dataset = LabeledDataset(args.ds, label_file='102flower/102flower_labels.txt', 
+    dataset = LabeledDataset(args.ds, label_file='102flowers/102flower_labels.txt', 
                              image_size=128, do_geo_aug=args.do_geo_aug)
 else:    
     dataset = UnlabeledDataset(args.ds, image_size=128, do_geo_aug=args.do_geo_aug)
