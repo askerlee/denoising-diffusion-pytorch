@@ -739,7 +739,7 @@ class GaussianDiffusion(nn.Module):
         if exists(dataset):
             if exists(classes):
                 # Take the first image as the representative image of each class in classes.
-                nn_img_indices = [ dataset.cls2indices[cls][0] for cls in classes ]
+                nn_img_indices = [ dataset.cls2indices[cls][0] for cls in classes.tolist() ]
                 old_training_status = dataset.training
                 # training = False: Disable augmentation of fetched images.
                 dataset.training = False
