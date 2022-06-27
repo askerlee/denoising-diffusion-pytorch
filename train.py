@@ -130,9 +130,8 @@ class Trainer(object):
         with tqdm(initial = self.step, total = self.train_num_steps, disable=not is_master) as pbar:
 
             while self.step < self.train_num_steps:
-                # Back up the weight of consistency_feat_ext & dist_feat_ext_tea.
+                # Back up the weight of consistency_feat_ext.
                 consistency_feat_ext = copy.deepcopy(self.model.denoise_fn.consistency_feat_ext)
-                dist_feat_ext_tea    = copy.deepcopy(self.model.denoise_fn.dist_feat_ext_tea)
 
                 for i in range(self.gradient_accumulate_every):
                     data = next(self.dl)
@@ -175,9 +174,6 @@ class Trainer(object):
                 self.opt.zero_grad()
                 # Restore consistency_feat_ext weights to keep it from being updated.
                 self.model.denoise_fn.consistency_feat_ext = consistency_feat_ext
-                # If do not fine-tune dist_feat_ext_tea, restore it to keep it from being updated.
-                if not self.model.denoise_fn.finetune_tea_feat_ext:
-                    self.model.denoise_fn.dist_feat_ext_tea = dist_feat_ext_tea
 
                 if self.step % self.update_ema_every == 0:
                     self.step_ema()

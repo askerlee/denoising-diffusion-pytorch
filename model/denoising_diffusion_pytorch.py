@@ -480,7 +480,7 @@ class Unet(nn.Module):
             # finetune_tea_feat_ext controls whether to fine-tune the teacher feature extractor.
             tea_feat = self.extract_pre_feat(self.dist_feat_ext_tea, img_tea, 
                                              mid_feat.shape[2:], 
-                                             has_grad=True, use_head_feat=False)
+                                             has_grad=self.finetune_tea_feat_ext, use_head_feat=False)
         else:
             tea_feat = None
 
