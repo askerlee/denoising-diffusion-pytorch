@@ -773,8 +773,8 @@ class GaussianDiffusion(nn.Module):
 
         return img
 
-    def calc_cls_interp_loss(self, img_gt, img_orig, classes, min_interp_w = 0., min_before_weight=True,
-                             noise_scheme='larger_t', min_t_percentile=0.75):
+    def calc_cls_interp_loss(self, img_gt, img_orig, classes, min_interp_w = 0., min_before_weight=False,
+                             noise_scheme='larger_t', min_t_percentile=0.9):
         assert self.cls_embed_type != 'none' and exists(classes)
 
         b, device = img_gt.shape[0], img_gt.device
@@ -823,7 +823,7 @@ class GaussianDiffusion(nn.Module):
             img_noisy_interp = w * img_noisy1 + (1 - w) * img_noisy2
 
         elif noise_scheme == 'almost_pure_noise':
-            t2 = torch.full((b2, ), self.num_timesteps - 1, device=device, dtype=torch.long)
+            t2 = torch.full((b2, ), self.num_timesteps - 2, device=device, dtype=torch.long)
             # self.alphas_cumprod[-1] = 0. So take -2 as the minimal alpha_cumprod, and scale it by 0.1.
             alpha_cumprod   = self.alphas_cumprod[-2] * 0.1
             alphas_cumprod  = torch.full((b, ), alpha_cumprod, device=device, dtype=img_gt.dtype)
