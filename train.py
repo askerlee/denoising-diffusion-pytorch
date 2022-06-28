@@ -130,11 +130,10 @@ class Trainer(object):
         with tqdm(initial = self.step, total = self.train_num_steps, disable=not is_master) as pbar:
 
             while self.step < self.train_num_steps:
-                # Back up the weight of consistency_feat_ext.
-                consistency_feat_ext = copy.deepcopy(self.model.denoise_fn.consistency_feat_ext)
+                self.model.denoise_fn.pre_update()
 
                 for i in range(self.gradient_accumulate_every):
-                    data = next(self.dl)
+                    data        = next(self.dl)
                     img         = data['img'].cuda()
                     img_orig    = data['img_orig'].cuda()
                     classes     = data['cls'].cuda()
@@ -172,9 +171,9 @@ class Trainer(object):
                 self.scaler.step(self.opt)
                 self.scaler.update()
                 self.opt.zero_grad()
-                # Restore consistency_feat_ext weights to keep it from being updated.
-                self.model.denoise_fn.consistency_feat_ext = consistency_feat_ext
 
+                self.model.denoise_fn.post_update()
+                
                 if self.step % self.update_ema_every == 0:
                     self.step_ema()
 
@@ -257,6 +256,8 @@ parser.add_argument('--wclsguide', dest='cls_guide_loss_weight', default=0.001, 
                     help='Guide denoising random images with class embedding. ')
 parser.add_argument('--consfullfeat', dest='consistency_use_head_feat', action='store_false', 
                     help='Use the full feature maps when computing consistency losses (e.g., class guidance loss).')
+parser.add_argument('--conssharetea', dest='consist_shares_tea_feat_ext', action='store_true', 
+                    help='Use the teacher feature extractor weights for the consistency loss.')
 
 torch.set_printoptions(sci_mode=False)
 args = parser.parse_args()
@@ -283,6 +284,11 @@ if args.cls_guide_loss_weight > 0:
         print0("Class guidance is enabled, but the feature network is 'repvgg_b0'. This will lead to bad performance.")
         print0("Recommended: '--featnet vit_tiny_patch16_224'.")
         exit(0)
+
+if args.consist_shares_tea_feat_ext and args.distillation_type == 'none':
+    print0("Consistency loss intends to share teacher feature extractor, but distillation is disabled "
+           "(no teacher feature extractor is to be shared).")
+    exit(0)
 
 if not args.debug:
     torch.distributed.init_process_group(backend="nccl", init_method='env://')

@@ -14,6 +14,7 @@ from .utils import timm_extract_features, print0, exists, exists_add, repeat_int
                    default, normalize_to_neg_one_to_one, unnormalize_to_zero_to_one, unnorm_save_image, \
                    UnlabeledDataset, LabeledDataset
 import os
+import copy
 
 timm_model2dim = { 'resnet34': 512,
                    'resnet18': 512,
@@ -224,6 +225,7 @@ class Unet(nn.Module):
         learned_variance = False,
         featnet_type = 'none',
         finetune_tea_feat_ext = False,
+        consist_shares_tea_feat_ext = True,
         distillation_type = 'none',
         cls_embed_type = 'none',
     ):
@@ -309,12 +311,12 @@ class Unet(nn.Module):
         self.mid_block2 = block_klass(mid_dim, mid_dim, kernel_size=1, time_emb_dim = time_dim)
 
         self.featnet_type      = featnet_type
-        self.finetune_tea_feat_ext  = finetune_tea_feat_ext
+        self.finetune_tea_feat_ext      = finetune_tea_feat_ext
+        self.consist_shares_tea_feat_ext   = consist_shares_tea_feat_ext
         self.distillation_type = distillation_type
 
         if self.featnet_type != 'none' and self.featnet_type != 'mini':
-            # Tried 'efficientnet_b0', but it doesn't perform well.
-            # 'resnet34', 'resnet18', 'repvgg_b0'
+            # Tried 'efficientnet_b0' and 'repvgg_b0', but they didn't perform well.
             self.featnet_type   = self.featnet_type 
             self.featnet_dim    = timm_model2dim[self.featnet_type]
             self.consistency_feat_ext    = timm.create_model(self.featnet_type, pretrained=True)
@@ -322,6 +324,8 @@ class Unet(nn.Module):
             if self.distillation_type != 'none':
                 self.dist_feat_ext_tea  = timm.create_model(self.featnet_type, pretrained=True)
                 self.dist_feat_ext_stu  = timm.create_model(self.featnet_type, pretrained=True)
+                if self.consist_shares_tea_feat_ext:
+                    self.consistency_feat_ext = copy.deepcopy(self.dist_feat_ext_tea)
             else:
                 self.dist_feat_ext_tea  = None
                 self.dist_feat_ext_stu  = None
@@ -329,7 +333,8 @@ class Unet(nn.Module):
             self.featnet_dim  = 0
             self.dist_feat_ext_tea = None
             self.dist_feat_ext_stu = None
-
+            self.consistency_feat_ext = None
+            
         # distillation_type: 'none' or 'tfrac'. 
         if self.distillation_type == 'none':
             extra_up_dim = 0
@@ -401,6 +406,22 @@ class Unet(nn.Module):
             distill_feat = F.interpolate(distill_feat, size=ref_shape, mode='bilinear', align_corners=False)
         # Otherwise, do not resize distill_feat.
         return distill_feat
+
+    def pre_update(self):
+        if not self.consist_shares_tea_feat_ext:
+            # Back up the weight of consistency_feat_ext.
+            self.consistency_feat_ext_backup = copy.deepcopy(self.consistency_feat_ext)
+        # Otherwise post_update() will restore consistency_feat_ext from dist_feat_ext_tea.
+        # No need to back up consistency_feat_ext.
+
+    def post_update(self):
+        if self.consist_shares_tea_feat_ext:
+            # Restore consistency_feat_ext from teacher feature extractor 
+            # to keep it from being updated by the consistency loss.
+            self.consistency_feat_ext = copy.deepcopy(self.dist_feat_ext_tea)
+        else:
+            # Restore consistency_feat_ext from the backup.
+            self.consistency_feat_ext = self.consistency_feat_ext_backup
 
     def forward(self, x, time, classes=None, cls_embed=None, img_tea=None):
         init_noise = x
