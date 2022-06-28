@@ -31,6 +31,7 @@ class Trainer(object):
         weight_decay = 0,
         train_num_steps = 100000,
         gradient_accumulate_every = 2,
+        grad_clip = 0.1,
         amp = True,
         step_start_ema = 2000,
         update_ema_every = 10,
@@ -52,6 +53,7 @@ class Trainer(object):
 
         self.batch_size = train_batch_size
         self.gradient_accumulate_every = gradient_accumulate_every
+        self.grad_clip = grad_clip
         self.train_num_steps = train_num_steps
 
         self.local_rank = local_rank
@@ -145,7 +147,7 @@ class Trainer(object):
                         # to make the loss consistent with being on a single GPU.
                         loss = loss_dict['loss'].mean()
                         self.scaler.scale(loss / self.gradient_accumulate_every).backward()
-
+                        
                     loss_stu = loss_dict['loss_stu'].mean()
                     loss_stu = reduce_tensor(loss_stu, self.world_size)
                     self.loss_meter.update('loss_stu', loss_stu.item())
@@ -167,6 +169,9 @@ class Trainer(object):
 
                     desc = ', '.join(desc_items)
                     pbar.set_description(desc)
+
+                if self.grad_clip > 0:
+                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
 
                 self.scaler.step(self.opt)
                 self.scaler.update()
@@ -200,6 +205,7 @@ parser.add_argument('--sampleseed', type=int, default=5678, help="Random seed fo
 
 parser.add_argument('--lr', type=float, default=4e-4, help="Learning rate")
 parser.add_argument('--bs', dest='batch_size', type=int, default=32, help="Batch size")
+parser.add_argument('--clip', dest='grad_clip', type=float, default=0.1, help="Gradient clipping")
 parser.add_argument('--cp', type=str, dest='cp_path', default=None, help="The path of a model checkpoint")
 parser.add_argument('--sample', dest='sample_only', action='store_true', help='Do sampling using a trained model')
 parser.add_argument('--nogeoaug', dest='do_geo_aug', action='store_false', 
@@ -394,6 +400,7 @@ trainer = Trainer(
     train_lr = args.lr,                 # default: 1e-4
     train_num_steps = 700000,           # total training steps
     gradient_accumulate_every = 2,      # gradient accumulation steps
+    grad_clip = args.grad_clip,         # default: 0.1
     ema_decay = 0.995,                  # exponential moving average decay
     amp = args.amp,                     # turn on mixed precision. Default: True
     sample_dir  = args.sample_dir,
