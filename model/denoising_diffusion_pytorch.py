@@ -582,7 +582,7 @@ class GaussianDiffusion(nn.Module):
         cls_embed_type = 'none',
         num_classes = -1,
         dataset = None,
-        consistency_use_head_feat = True,
+        consistency_use_head_feat = False,
         cls_guide_type = 'none',
         cls_guide_loss_weight = 0.01,
         align_tea_stu_feat_weight = 0,

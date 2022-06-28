@@ -254,8 +254,8 @@ parser.add_argument('--clsguide', dest='cls_guide_type', choices=['none', 'singl
                          'or interp (interpolation between two classes to enforce class embedding linearity)')
 parser.add_argument('--wclsguide', dest='cls_guide_loss_weight', default=0.001, type=float, 
                     help='Guide denoising random images with class embedding. ')
-parser.add_argument('--consfullfeat', dest='consistency_use_head_feat', action='store_false', 
-                    help='Use the full feature maps when computing consistency losses (e.g., class guidance loss).')
+parser.add_argument('--consheadfeat', dest='consistency_use_head_feat', action='store_true', 
+                    help='Use the collapsed feature maps when computing consistency losses (e.g., class guidance loss).')
 parser.add_argument('--conssharetea', dest='consist_shares_tea_feat_ext', action='store_true', 
                     help='Use the teacher feature extractor weights for the consistency loss.')
 
