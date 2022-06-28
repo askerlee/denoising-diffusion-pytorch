@@ -285,10 +285,15 @@ if args.cls_guide_loss_weight > 0:
         print0("Recommended: '--featnet vit_tiny_patch16_224'.")
         exit(0)
 
-if args.consist_shares_tea_feat_ext and args.distillation_type == 'none':
-    print0("Consistency loss intends to share teacher feature extractor, but distillation is disabled "
-           "(no teacher feature extractor is to be shared).")
-    exit(0)
+if args.consist_shares_tea_feat_ext:
+    if args.distillation_type == 'none':
+        print0("Consistency loss intends to share teacher feature extractor, but distillation is disabled "
+            "(no teacher feature extractor is to be shared).")
+        exit(0)
+    if not args.finetune_tea_feat_ext:
+        print0("Consistency loss intends to share teacher feature extractor, but teacher feature extractor is not "
+               "fine-tuned (Then no point to share it).")
+        exit(0)
 
 if not args.debug:
     torch.distributed.init_process_group(backend="nccl", init_method='env://')
