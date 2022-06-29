@@ -429,7 +429,8 @@ class Unet(nn.Module):
         else:
             # Restore cls_guide_feat_ext from the backup.
             self.cls_guide_feat_ext = self.cls_guide_feat_ext_backup
-
+            self.cls_guide_feat_ext_backup = None
+            
     def forward(self, x, time, classes=None, cls_embed=None, img_tea=None):
         init_noise = x
         x = self.init_conv(x)
