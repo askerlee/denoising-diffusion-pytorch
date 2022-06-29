@@ -6,7 +6,7 @@ else
 fi
     
 echo "172.20.74.65"
-rsync -r shaohua@172.20.74.65:denoising-diffusion-pytorch/samples/ $ROOT/denoising/74.65-pok-interpclip-tea-bs96/ -aic  2>&1|grep -E "fcstp|f\\+\\+"
+rsync -r shaohua@172.20.74.65:denoising-diffusion-pytorch/samples/ $ROOT/denoising/74.65-pok-interpclip10-tea-bs96/ -aic  2>&1|grep -E "fcstp|f\\+\\+"
 echo "172.20.117.215"
 rsync -r shaohua@172.20.117.215:denoising-diffusion-pytorch/samples/ $ROOT/denoising/117.215-pok-clsinterpshare2-tea/ -aic 2>&1|grep -E "fcstp|f\\+\\+"
 #echo "10.2.18.238"
