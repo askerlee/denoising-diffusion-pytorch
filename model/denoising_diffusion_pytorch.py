@@ -794,7 +794,7 @@ class GaussianDiffusion(nn.Module):
 
         return img
 
-    def calc_cls_interp_loss(self, img_gt, img_orig, classes, min_interp_w = 0., min_before_weight=False,
+    def calc_cls_interp_loss(self, img_gt, img_orig, classes, min_interp_w = 0., min_before_weight=True,
                              noise_scheme='larger_t', min_t_percentile=0.9):
         assert self.cls_embed_type != 'none' and exists(classes)
 
