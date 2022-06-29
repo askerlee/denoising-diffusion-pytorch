@@ -340,7 +340,8 @@ class Unet(nn.Module):
                 self.cls_guide_feat_ext = timm.create_model(self.cls_guide_featnet_type, pretrained=True)
         else:
             self.cls_guide_feat_ext = None
-
+        self.pre_update()
+        
         # distillation_type: 'none' or 'tfrac'. 
         if self.distillation_type == 'none':
             extra_up_dim = 0
