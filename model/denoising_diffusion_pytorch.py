@@ -340,7 +340,6 @@ class Unet(nn.Module):
                 self.cls_guide_feat_ext = timm.create_model(self.cls_guide_featnet_type, pretrained=True)
         else:
             self.cls_guide_feat_ext = None
-        self.pre_update()
         
         # distillation_type: 'none' or 'tfrac'. 
         if self.distillation_type == 'none':
@@ -430,7 +429,7 @@ class Unet(nn.Module):
             # Restore cls_guide_feat_ext from the backup.
             self.cls_guide_feat_ext = self.cls_guide_feat_ext_backup
             self.cls_guide_feat_ext_backup = None
-            
+
     def forward(self, x, time, classes=None, cls_embed=None, img_tea=None):
         init_noise = x
         x = self.init_conv(x)
