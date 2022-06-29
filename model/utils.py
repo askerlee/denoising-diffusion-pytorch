@@ -528,5 +528,4 @@ def fast_randn(*shape, device='cpu', mean=0, std=1):
         return torch.cuda.FloatTensor(shape).normal_(mean, std)
 
 def fast_randn_like(tens):
-    return fast_randn(*tens.shape)
-    
+    return fast_randn(*tens.shape, device=tens.device)
