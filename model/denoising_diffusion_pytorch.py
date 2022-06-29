@@ -332,6 +332,7 @@ class Unet(nn.Module):
             self.dist_feat_ext_tea = None
             self.dist_feat_ext_stu = None
 
+        self.cls_guide_featnet_type = cls_guide_featnet_type
         if self.cls_guide_featnet_type != 'none':
             if self.cls_guide_shares_tea_feat_ext:
                 self.cls_guide_feat_ext = copy.deepcopy(self.dist_feat_ext_tea) 
