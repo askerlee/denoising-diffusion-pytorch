@@ -223,9 +223,10 @@ class Unet(nn.Module):
         memory_size = 1024,
         num_classes = -1,
         learned_variance = False,
-        featnet_type = 'none',
+        featnet_type = 'vit_tiny_patch16_224',
+        cls_guide_featnet_type = 'repvgg_b0',
         finetune_tea_feat_ext = False,
-        consist_shares_tea_feat_ext = True,
+        cls_guide_shares_tea_feat_ext = False,
         distillation_type = 'none',
         cls_embed_type = 'none',
     ):
@@ -312,20 +313,17 @@ class Unet(nn.Module):
 
         self.featnet_type      = featnet_type
         self.finetune_tea_feat_ext      = finetune_tea_feat_ext
-        self.consist_shares_tea_feat_ext   = consist_shares_tea_feat_ext
+        self.cls_guide_shares_tea_feat_ext   = cls_guide_shares_tea_feat_ext
         self.distillation_type = distillation_type
 
         if self.featnet_type != 'none' and self.featnet_type != 'mini':
             # Tried 'efficientnet_b0' and 'repvgg_b0', but they didn't perform well.
             self.featnet_type   = self.featnet_type 
             self.featnet_dim    = timm_model2dim[self.featnet_type]
-            self.consistency_feat_ext    = timm.create_model(self.featnet_type, pretrained=True)
 
             if self.distillation_type != 'none':
                 self.dist_feat_ext_tea  = timm.create_model(self.featnet_type, pretrained=True)
                 self.dist_feat_ext_stu  = timm.create_model(self.featnet_type, pretrained=True)
-                if self.consist_shares_tea_feat_ext:
-                    self.consistency_feat_ext = copy.deepcopy(self.dist_feat_ext_tea)
             else:
                 self.dist_feat_ext_tea  = None
                 self.dist_feat_ext_stu  = None
@@ -333,8 +331,15 @@ class Unet(nn.Module):
             self.featnet_dim  = 0
             self.dist_feat_ext_tea = None
             self.dist_feat_ext_stu = None
-            self.consistency_feat_ext = None
-            
+
+        if self.cls_guide_featnet_type != 'none':
+            if self.cls_guide_shares_tea_feat_ext:
+                self.cls_guide_feat_ext = copy.deepcopy(self.dist_feat_ext_tea) 
+            else:
+                self.cls_guide_feat_ext = timm.create_model(self.cls_guide_featnet_type, pretrained=True)
+        else:
+            self.cls_guide_feat_ext = None
+
         # distillation_type: 'none' or 'tfrac'. 
         if self.distillation_type == 'none':
             extra_up_dim = 0
@@ -408,20 +413,20 @@ class Unet(nn.Module):
         return distill_feat
 
     def pre_update(self):
-        if not self.consist_shares_tea_feat_ext:
-            # Back up the weight of consistency_feat_ext.
-            self.consistency_feat_ext_backup = copy.deepcopy(self.consistency_feat_ext)
-        # Otherwise post_update() will restore consistency_feat_ext from dist_feat_ext_tea.
-        # No need to back up consistency_feat_ext.
+        if not self.cls_guide_shares_tea_feat_ext:
+            # Back up the weight of cls_guide_feat_ext.
+            self.cls_guide_feat_ext_backup = copy.deepcopy(self.cls_guide_feat_ext)
+        # Otherwise post_update() will restore cls_guide_feat_ext from dist_feat_ext_tea.
+        # No need to back up cls_guide_feat_ext.
 
     def post_update(self):
-        if self.consist_shares_tea_feat_ext:
-            # Restore consistency_feat_ext from teacher feature extractor 
+        if self.cls_guide_shares_tea_feat_ext:
+            # Restore cls_guide_feat_ext from teacher feature extractor 
             # to keep it from being updated by the consistency loss.
-            self.consistency_feat_ext = copy.deepcopy(self.dist_feat_ext_tea)
+            self.cls_guide_feat_ext = copy.deepcopy(self.dist_feat_ext_tea)
         else:
-            # Restore consistency_feat_ext from the backup.
-            self.consistency_feat_ext = self.consistency_feat_ext_backup
+            # Restore cls_guide_feat_ext from the backup.
+            self.cls_guide_feat_ext = self.cls_guide_feat_ext_backup
 
     def forward(self, x, time, classes=None, cls_embed=None, img_tea=None):
         init_noise = x
@@ -582,7 +587,7 @@ class GaussianDiffusion(nn.Module):
         cls_embed_type = 'none',
         num_classes = -1,
         dataset = None,
-        consistency_use_head_feat = False,
+        cls_guide_use_head_feat = False,
         cls_guide_type = 'none',
         cls_guide_loss_weight = 0.01,
         align_tea_stu_feat_weight = 0,
@@ -619,7 +624,7 @@ class GaussianDiffusion(nn.Module):
         self.interp_loss_weight     = 0
         # Use backbone head features for consistency losses, i.e., with the geometric dimensions collapsed.
         # such as class-guidance loss and interpolation loss (interpolation doesn't work well, though).
-        self.consistency_use_head_feat  = consistency_use_head_feat
+        self.cls_guide_use_head_feat  = cls_guide_use_head_feat
         self.cls_guide_type             = cls_guide_type
         self.cls_guide_loss_weight      = cls_guide_loss_weight
         self.align_tea_stu_feat_weight  = align_tea_stu_feat_weight
@@ -821,8 +826,8 @@ class GaussianDiffusion(nn.Module):
             img_orig        = torch.cat([img_orig1, img_orig2], dim=0)
             classes         = classes1.repeat(2)
 
-        feat_gt = self.denoise_fn.extract_pre_feat(self.denoise_fn.consistency_feat_ext, img_gt, ref_shape=None, 
-                                                   has_grad=True, use_head_feat=self.consistency_use_head_feat)        
+        feat_gt = self.denoise_fn.extract_pre_feat(self.denoise_fn.cls_guide_feat_ext, img_gt, ref_shape=None, 
+                                                   has_grad=True, use_head_feat=self.cls_guide_use_head_feat)        
         feat_gt1, feat_gt2  = feat_gt[:b2], feat_gt[b2:]
         w = torch.rand((b2, ), device=img_gt.device)
         # Normalize w into [min_interp_w, 1-min_interp_w], i.e., [0.2, 0.8].
@@ -893,8 +898,8 @@ class GaussianDiffusion(nn.Module):
                 unnorm_save_image(img_stu_pred, img_pred_save_path, nrow = 8)
                 #print("Predicted images are saved to", img_pred_save_path)
 
-        feat_interp = self.denoise_fn.extract_pre_feat(self.denoise_fn.consistency_feat_ext, img_stu_pred, ref_shape=None, 
-                                                       has_grad=True, use_head_feat=self.consistency_use_head_feat)
+        feat_interp = self.denoise_fn.extract_pre_feat(self.denoise_fn.cls_guide_feat_ext, img_stu_pred, ref_shape=None, 
+                                                       has_grad=True, use_head_feat=self.cls_guide_use_head_feat)
 
         loss_interp1 = self.consist_loss_fn(feat_interp, feat_gt1, reduction='none')
         loss_interp2 = self.consist_loss_fn(feat_interp, feat_gt2, reduction='none')
@@ -928,8 +933,8 @@ class GaussianDiffusion(nn.Module):
         img_gt2 = img_gt[:b2]
         classes2 = classes[:b2]
 
-        feat_gt = self.denoise_fn.extract_pre_feat(self.denoise_fn.consistency_feat_ext, img_gt2, ref_shape=None, 
-                                                   has_grad=True, use_head_feat=self.consistency_use_head_feat)        
+        feat_gt = self.denoise_fn.extract_pre_feat(self.denoise_fn.cls_guide_feat_ext, img_gt2, ref_shape=None, 
+                                                   has_grad=True, use_head_feat=self.cls_guide_use_head_feat)        
         noise = torch.randn_like(img_gt2)
 
         if noise_scheme == 'pure_noise':
@@ -985,8 +990,8 @@ class GaussianDiffusion(nn.Module):
                 unnorm_save_image(img_stu_pred, img_pred_save_path, nrow = 8)
                 #print("Predicted images are saved to", img_pred_save_path)
 
-        feat_stu = self.denoise_fn.extract_pre_feat(self.denoise_fn.consistency_feat_ext, img_stu_pred, ref_shape=None, 
-                                                     has_grad=True, use_head_feat=self.consistency_use_head_feat)
+        feat_stu = self.denoise_fn.extract_pre_feat(self.denoise_fn.cls_guide_feat_ext, img_stu_pred, ref_shape=None, 
+                                                     has_grad=True, use_head_feat=self.cls_guide_use_head_feat)
 
         loss_cls_guide = self.consist_loss_fn(feat_stu, feat_gt)
         return loss_cls_guide

@@ -242,7 +242,8 @@ parser.add_argument('--featnet', dest='featnet_type',
                     choices=[ 'none', 'mini', 'resnet34', 'resnet18', 'repvgg_b0', 
                               'mobilenetv2_120d', 'vit_base_patch8_224', 'vit_tiny_patch16_224' ], 
                     default='vit_tiny_patch16_224', 
-                    help='Type of the feature network. Used by the distillation and interpolation losses.')
+                    help='Type of the feature network. Used by the distillation and loss.')
+
 parser.add_argument('--distill', dest='distillation_type', choices=['none', 'tfrac'], default='tfrac', 
                     help='Distillation type')
 parser.add_argument('--dtfrac', dest='distill_t_frac', default=0.8, type=float, 
@@ -255,14 +256,19 @@ parser.add_argument('--alignfeat', dest='align_tea_stu_feat_weight', default=0.0
                     'Default: 0.0, meaning no alignment.')
 parser.add_argument('--clsembed', dest='cls_embed_type', choices=['none', 'tea_stu'], default='tea_stu', 
                     help='How class embedding is incorporated in the student and teacher')
+parser.add_argument('--clsguidefeatnet', dest='cls_guide_featnet_type', 
+                    choices=[ 'none', 'resnet34', 'resnet18', 'repvgg_b0', 
+                              'mobilenetv2_120d', 'vit_base_patch8_224', 'vit_tiny_patch16_224' ], 
+                    default='repvgg_b0', 
+                    help='Type of the feature network for the class guidance loss.')
 parser.add_argument('--clsguide', dest='cls_guide_type', choices=['none', 'single', 'interp'], default='single', 
                     help='The type of class guidance: none, single (one class only), '
                          'or interp (interpolation between two classes to enforce class embedding linearity)')
 parser.add_argument('--wclsguide', dest='cls_guide_loss_weight', default=0.001, type=float, 
                     help='Guide denoising random images with class embedding. ')
-parser.add_argument('--consheadfeat', dest='consistency_use_head_feat', action='store_true', 
+parser.add_argument('--clsheadfeat', dest='cls_guide_use_head_feat', action='store_true', 
                     help='Use the collapsed feature maps when computing consistency losses (e.g., class guidance loss).')
-parser.add_argument('--conssharetea', dest='consist_shares_tea_feat_ext', action='store_true', 
+parser.add_argument('--clssharetea', dest='cls_guide_shares_tea_feat_ext', action='store_true', 
                     help='Use the teacher feature extractor weights for the consistency loss.')
 
 torch.set_printoptions(sci_mode=False)
@@ -291,7 +297,7 @@ if args.cls_guide_loss_weight > 0:
         print0("Recommended: '--featnet vit_tiny_patch16_224'.")
         exit(0)
 
-if args.consist_shares_tea_feat_ext:
+if args.cls_guide_shares_tea_feat_ext:
     if args.distillation_type == 'none':
         print0("Consistency loss intends to share teacher feature extractor, but distillation is disabled "
             "(no teacher feature extractor is to be shared).")
@@ -299,6 +305,10 @@ if args.consist_shares_tea_feat_ext:
     if not args.finetune_tea_feat_ext:
         print0("Consistency loss intends to share teacher feature extractor, but teacher feature extractor is not "
                "fine-tuned (Then no point to share it).")
+        exit(0)
+    if args.cls_guide_featnet_type != args.featnet_type:
+        print0("Consistency loss intends to share teacher feature extractor, but the feature network is not the same "
+               "as the teacher feature extractor.")
         exit(0)
 
 if not args.debug:
@@ -338,6 +348,7 @@ unet = Unet(
     # if do distillation and featnet_type=='resnet34' or another model name, 
     # use image features extracted with a pretrained model to train the teacher model.
     featnet_type = args.featnet_type,
+    cls_guide_featnet_type = args.cls_guide_featnet_type,
     distillation_type = args.distillation_type,
     # if finetune_tea_feat_ext=False,
     # do not finetune the pretrained image feature extractor of the teacher model.
@@ -362,7 +373,7 @@ diffusion = GaussianDiffusion(
     cls_embed_type = args.cls_embed_type,
     num_classes = num_classes,
     dataset = dataset,
-    consistency_use_head_feat = args.consistency_use_head_feat,
+    cls_guide_use_head_feat = args.cls_guide_use_head_feat,
     cls_guide_type = args.cls_guide_type,
     cls_guide_loss_weight = args.cls_guide_loss_weight,
     align_tea_stu_feat_weight = args.align_tea_stu_feat_weight,
