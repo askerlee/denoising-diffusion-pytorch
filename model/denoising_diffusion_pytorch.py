@@ -12,7 +12,7 @@ from einops import rearrange
 from .laplacian import LapLoss
 from .utils import timm_extract_features, print0, exists, exists_add, repeat_interleave, \
                    default, normalize_to_neg_one_to_one, unnormalize_to_zero_to_one, unnorm_save_image, \
-                   UnlabeledDataset, LabeledDataset
+                   UnlabeledDataset, LabeledDataset, fast_randn, fast_randn_like
 import os
 import copy
 
@@ -132,7 +132,7 @@ class LinearAttention(nn.Module):
         self.memory_size = memory_size
         if self.memory_size > 0:
             # Persistent memory that serves as a codebook used for image generation.
-            self.memory = nn.Parameter(torch.randn(1, dim, 1, memory_size))
+            self.memory = nn.Parameter(fast_randn(1, dim, 1, memory_size))
 
         self.to_qkv = nn.Conv2d(dim, hidden_dim * 3, 1, bias = False)
 
@@ -181,7 +181,7 @@ class Attention(nn.Module):
         self.memory_size = memory_size
         if self.memory_size > 0:
             # Persistent memory that serves as a codebook used for image generation.
-            self.memory = nn.Parameter(torch.randn(1, dim, 1, memory_size))
+            self.memory = nn.Parameter(fast_randn(1, dim, 1, memory_size))
 
         self.to_qkv = nn.Conv2d(dim, hidden_dim * 3, 1, bias = False)
         self.to_out = nn.Conv2d(hidden_dim, dim, 1)
@@ -543,8 +543,8 @@ def extract_tensor(a, t, x_shape):
     return out.reshape(b, *((1,) * (len(x_shape) - 1)))
 
 def noise_like(shape, device, repeat=False):
-    repeat_noise = lambda: torch.randn((1, *shape[1:]), device=device).repeat(shape[0], *((1,) * (len(shape) - 1)))
-    noise = lambda: torch.randn(shape, device=device)
+    repeat_noise = lambda: fast_randn((1, *shape[1:]), device=device).repeat(shape[0], *((1,) * (len(shape) - 1)))
+    noise = lambda: fast_randn(shape, device=device)
     return repeat_noise() if repeat else noise()
 
 def cosine_beta_schedule(num_timesteps, s = 0.008):
@@ -746,7 +746,7 @@ class GaussianDiffusion(nn.Module):
         device = self.betas.device
 
         b = shape[0]
-        img = torch.randn(shape, device=device)
+        img = fast_randn(shape, device=device)
         if self.cls_embed_type == 'none':
             classes = None
         else:
@@ -837,7 +837,7 @@ class GaussianDiffusion(nn.Module):
         # w.shape: (b2, 1, 1, 1)
         w = w.view(b2, *((1,) * (len(img_gt.shape) - 1)))
 
-        noise = torch.randn_like(img_gt)
+        noise = fast_randn_like(img_gt)
         if noise_scheme == 'pure_noise':
             t2 = torch.full((b2, ), self.num_timesteps - 1, device=device, dtype=torch.long)
             img_noisy_interp = noise[:b2]
@@ -937,7 +937,7 @@ class GaussianDiffusion(nn.Module):
 
         feat_gt = self.denoise_fn.extract_pre_feat(self.denoise_fn.cls_guide_feat_ext, img_gt2, ref_shape=None, 
                                                    has_grad=False, use_head_feat=self.cls_guide_use_head_feat)        
-        noise = torch.randn_like(img_gt2)
+        noise = fast_randn_like(img_gt2)
 
         if noise_scheme == 'pure_noise':
             t = torch.full((b2, ), self.num_timesteps - 1, device=device, dtype=torch.long)
@@ -1002,7 +1002,7 @@ class GaussianDiffusion(nn.Module):
     def q_sample(self, x_start, t, noise=None, distill_t_frac=-1):
         assert distill_t_frac <= 1
 
-        noise = default(noise, lambda: torch.randn_like(x_start))
+        noise = default(noise, lambda: fast_randn_like(x_start))
         #x_start_weight = extract_tensor(self.sqrt_alphas_cumprod, t.flatten(), x_start.shape).reshape(t.shape)
         #noise_weight   = extract_tensor(self.sqrt_one_minus_alphas_cumprod, t.flatten(), x_start.shape).reshape(t.shape)
         # t serves as a tensor of indices, to extract elements from alphas_cumprod.
@@ -1078,7 +1078,7 @@ class GaussianDiffusion(nn.Module):
     def p_losses(self, x_start, x_orig, t, classes, noise = None):
         b, c, h, w = x_start.shape
         # noise: a Gaussian noise for each pixel.
-        noise = default(noise, lambda: torch.randn_like(x_start))
+        noise = default(noise, lambda: fast_randn_like(x_start))
 
         x_noisy = self.q_sample(x_start=x_start, t=t, noise=noise, 
                                 distill_t_frac=self.distill_t_frac)

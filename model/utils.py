@@ -521,3 +521,12 @@ def unnorm_save_image(img, img_save_path, nrow):
     img = unnormalize_to_zero_to_one(img)
     utils.save_image(img, img_save_path, nrow=nrow)
     
+def fast_randn(*shape, device='cpu', mean=0, std=1):
+    if device == 'cpu':
+        return torch.FloatTensor(shape).normal_(mean, std)
+    else:
+        return torch.cuda.FloatTensor(shape).normal_(mean, std)
+
+def fast_randn_like(tens):
+    return fast_randn(*tens.shape)
+    
