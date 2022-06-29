@@ -8,7 +8,7 @@ fi
 echo "172.20.74.65"
 rsync -r shaohua@172.20.74.65:denoising-diffusion-pytorch/samples/ $ROOT/denoising/74.65-pok-interpclip100-tea/ -aic  2>&1|grep -E "fcstp|f\\+\\+"
 echo "172.20.117.215"
-rsync -r shaohua@172.20.117.215:denoising-diffusion-pytorch/samples/ $ROOT/denoising/117.215-pok-clsinterpshare2-tea/ -aic 2>&1|grep -E "fcstp|f\\+\\+"
+rsync -r shaohua@172.20.117.215:denoising-diffusion-pytorch/samples/ $ROOT/denoising/117.215-pok-interpvgg-tea/ -aic 2>&1|grep -E "fcstp|f\\+\\+"
 #echo "10.2.18.238"
 #rsync shaohua@10.2.18.238:denoising-diffusion-pytorch/results/'*png' $ROOT/denoising/18.238-clsguide-repvgg-full/ -aic  2>&1|grep -E "fcstp|f\+\+"
 #echo "10.2.18.254-1"

@@ -829,7 +829,7 @@ class GaussianDiffusion(nn.Module):
             classes         = classes1.repeat(2)
 
         feat_gt = self.denoise_fn.extract_pre_feat(self.denoise_fn.cls_guide_feat_ext, img_gt, ref_shape=None, 
-                                                   has_grad=True, use_head_feat=self.cls_guide_use_head_feat)        
+                                                   has_grad=False, use_head_feat=self.cls_guide_use_head_feat)        
         feat_gt1, feat_gt2  = feat_gt[:b2], feat_gt[b2:]
         w = torch.rand((b2, ), device=img_gt.device)
         # Normalize w into [min_interp_w, 1-min_interp_w], i.e., [0.2, 0.8].
@@ -936,7 +936,7 @@ class GaussianDiffusion(nn.Module):
         classes2 = classes[:b2]
 
         feat_gt = self.denoise_fn.extract_pre_feat(self.denoise_fn.cls_guide_feat_ext, img_gt2, ref_shape=None, 
-                                                   has_grad=True, use_head_feat=self.cls_guide_use_head_feat)        
+                                                   has_grad=False, use_head_feat=self.cls_guide_use_head_feat)        
         noise = torch.randn_like(img_gt2)
 
         if noise_scheme == 'pure_noise':
