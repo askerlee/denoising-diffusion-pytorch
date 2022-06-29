@@ -210,7 +210,7 @@ parser.add_argument('--cp', type=str, dest='cp_path', default=None, help="The pa
 parser.add_argument('--sample', dest='sample_only', action='store_true', help='Do sampling using a trained model')
 parser.add_argument('--nogeoaug', dest='do_geo_aug', action='store_false', 
                     help='Do not do geometric augmentation to training images')
-parser.add_argument('--workers', dest='num_workers', type=int, default=5, 
+parser.add_argument('--workers', dest='num_workers', type=int, default=3, 
                     help="Number of workers for data loading. On machines with slower disk IO, this should be higher.")
 parser.add_argument('--debug', action='store_true', help='Debug the diffusion process')
 
