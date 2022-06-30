@@ -18,4 +18,4 @@ rsync -r shaohua@172.20.117.215:denoising-diffusion-pytorch/samples/ $ROOT/denoi
 echo "A100-1"
 rsync -r shaohua@172.20.117.175:denoising-diffusion-pytorch/samples/ $ROOT/denoising/A100-flower-interpvgg-tea-bs64/ -aic  2>&1|grep -E "fcstp|f\+\+"
 echo "A100-2"
-rsync -r shaohua@172.20.117.175:denoising-diffusion-pytorch/samples2/ $ROOT/denoising/A100-flower-interpclip2-tea-bs64/ -aic  2>&1|grep -E "fcstp|f\+\+"
+rsync -r shaohua@172.20.117.175:denoising-diffusion-pytorch/samples2/ $ROOT/denoising/A100-flower-interpvit-tea-bs64/ -aic  2>&1|grep -E "fcstp|f\+\+"

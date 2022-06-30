@@ -259,13 +259,15 @@ parser.add_argument('--clsembed', dest='cls_embed_type', choices=['none', 'tea_s
 parser.add_argument('--clsguidefeatnet', dest='cls_guide_featnet_type', 
                     choices=[ 'none', 'resnet34', 'resnet18', 'repvgg_b0', 
                               'mobilenetv2_120d', 'vit_base_patch8_224', 'vit_tiny_patch16_224' ], 
-                    default='repvgg_b0', 
+                    default='vit_tiny_patch16_224', 
                     help='Type of the feature network for the class guidance loss.')
 parser.add_argument('--clsguide', dest='cls_guide_type', choices=['none', 'single', 'interp'], default='single', 
                     help='The type of class guidance: none, single (one class only), '
                          'or interp (interpolation between two classes to enforce class embedding linearity)')
 parser.add_argument('--wclsguide', dest='cls_guide_loss_weight', default=0.001, type=float, 
                     help='Guide denoising random images with class embedding. ')
+parser.add_argument('--clsguide-denoise-steps', dest='cls_guide_denoise_steps', default=2, type=int,
+                    help='Number of steps to denoise for the class guidance loss.')
 parser.add_argument('--clsheadfeat', dest='cls_guide_use_head_feat', action='store_true', 
                     help='Use the collapsed feature maps when computing consistency losses (e.g., class guidance loss).')
 parser.add_argument('--clssharetea', dest='cls_guide_shares_tea_feat_ext', action='store_true', 
@@ -376,6 +378,7 @@ diffusion = GaussianDiffusion(
     cls_guide_use_head_feat = args.cls_guide_use_head_feat,
     cls_guide_type = args.cls_guide_type,
     cls_guide_loss_weight = args.cls_guide_loss_weight,
+    cls_guide_denoise_steps = args.cls_guide_denoise_steps,
     align_tea_stu_feat_weight = args.align_tea_stu_feat_weight,
     sample_dir = args.sample_dir,
     debug = args.debug,

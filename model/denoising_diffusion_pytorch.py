@@ -430,7 +430,7 @@ class Unet(nn.Module):
             self.cls_guide_feat_ext = self.cls_guide_feat_ext_backup
             self.cls_guide_feat_ext_backup = None
 
-    def forward(self, x, time, classes=None, cls_embed=None, img_tea=None):
+    def forward(self, x, time, classes_or_embed=None, img_tea=None):
         init_noise = x
         x = self.init_conv(x)
         # t: time embedding.
@@ -442,12 +442,14 @@ class Unet(nn.Module):
             t = None
 
         if self.cls_embed_type != 'none':
-            # If classes is provided, cls_embed should be None.
-            # If cls_embed is provided, classes should be None (but we didn't check it yet).
-            if exists(classes):
-                assert cls_embed is None
-                cls_embed = self.cls_embedding(classes)
-            
+            if exists(classes_or_embed):
+                # classes_or_embed contains classes.
+                if classes_or_embed.numel() == classes_or_embed.shape[0]:
+                    cls_embed = self.cls_embedding(classes_or_embed)
+                # classes_or_embed contains embeddings.
+                else:
+                    cls_embed = classes_or_embed
+
             cls_embed = self.cls_embed_ln(cls_embed)
             # cls_embed: [batch, 1, 1, time_dim=256].
             cls_embed = cls_embed.view(cls_embed.shape[0], *((1,) * (len(x.shape) - 2)), -1)
@@ -592,6 +594,7 @@ class GaussianDiffusion(nn.Module):
         cls_guide_use_head_feat = False,
         cls_guide_type = 'none',
         cls_guide_loss_weight = 0.01,
+        cls_guide_denoise_steps = 2,
         align_tea_stu_feat_weight = 0,
         sample_dir = 'samples',      
         debug = False,
@@ -629,6 +632,7 @@ class GaussianDiffusion(nn.Module):
         self.cls_guide_use_head_feat  = cls_guide_use_head_feat
         self.cls_guide_type             = cls_guide_type
         self.cls_guide_loss_weight      = cls_guide_loss_weight
+        self.cls_guide_denoise_steps    = cls_guide_denoise_steps
         self.align_tea_stu_feat_weight  = align_tea_stu_feat_weight
         self.sample_dir = sample_dir
         self.debug = debug
@@ -710,8 +714,8 @@ class GaussianDiffusion(nn.Module):
         return posterior_mean, posterior_variance, posterior_log_variance_clipped
 
     # p_mean_variance() returns the denoised/generated image mean and noise variance.
-    def p_mean_variance(self, x, t, classes, clip_denoised: bool):
-        model_output_dict = self.denoise_fn(x, t, classes=classes)
+    def p_mean_variance(self, x, t, classes_or_embed, clip_denoised: bool):
+        model_output_dict = self.denoise_fn(x, t, classes_or_embed=classes_or_embed)
         model_output = model_output_dict['pred_stu']
 
         if self.objective == 'pred_noise':
@@ -732,31 +736,41 @@ class GaussianDiffusion(nn.Module):
     # As p_sample() is called in every iteration in p_sample_loop(), 
     # it results in a stochastic denoising trajectory,
     # i.e., may generate different images given the same input noise.
-    @torch.no_grad()
-    def p_sample(self, x, t, classes=None, clip_denoised=True, repeat_noise=False):
+    def p_sample(self, x, t, classes_or_embed=None, clip_denoised=True, repeat_noise=False):
         b, *_, device = *x.shape, x.device
-        model_mean, _, model_log_variance = self.p_mean_variance(x=x, t=t, classes=classes, clip_denoised=clip_denoised)
+        model_mean, _, model_log_variance = self.p_mean_variance(x=x, t=t, classes_or_embed=classes_or_embed, clip_denoised=clip_denoised)
         noise = noise_like(x.shape, device, repeat_noise)
         # no noise when t == 0
         nonzero_mask = (1 - (t == 0).float()).reshape(b, *((1,) * (len(x.shape) - 1)))
         return model_mean + nonzero_mask * (0.5 * model_log_variance).exp() * noise
 
-    @torch.no_grad()
-    def p_sample_loop(self, shape):
+    def p_sample_loop(self, shape, noise=None, classes_or_embed=None, partial_steps=-1):
         device = self.betas.device
 
         b = shape[0]
-        img = fast_randn(shape, device=device)
-        if self.cls_embed_type == 'none':
-            classes = None
+        if noise is None:
+            img = fast_randn(shape, device=device)
         else:
-            classes = torch.randint(0, self.num_classes, (b,), device=device)
+            img = noise
 
-        for i in reversed(range(0, self.num_timesteps)):
-            img = self.p_sample(img, torch.full((b,), i, device=device, dtype=torch.long), classes=classes)
+        if self.cls_embed_type == 'none':
+            classes_or_embed = None
+        elif classes_or_embed is None:
+            # classes_or_embed is initialized as random classes.
+            classes_or_embed = torch.randint(0, self.num_classes, (b,), device=device)
+
+        if partial_steps == -1:
+            # Take a full sample loop.
+            t0 = 0
+        else:
+            # Only take partial steps (e.g., 2 steps).
+            t0 = self.num_timesteps - partial_steps
+
+        for i in reversed(range(t0, self.num_timesteps)):
+            img = self.p_sample(img, torch.full((b,), i, device=device, dtype=torch.long), classes_or_embed=classes_or_embed)
 
         img = unnormalize_to_zero_to_one(img)
-        return img, classes
+        return img, classes_or_embed
 
     @torch.no_grad()
     def sample(self, batch_size = 16, dataset=None):
@@ -874,13 +888,17 @@ class GaussianDiffusion(nn.Module):
 
         # Setting the last param (img_tea) to None, so that teacher module won't be executed, 
         # to reduce unnecessary compute.
-        model_output_dict = self.denoise_fn(img_noisy_interp, t2, cls_embed=cls_embed_interp)
-        img_stu_pred = model_output_dict['pred_stu']
+        # model_output_dict = self.denoise_fn(img_noisy_interp, t2, classes_or_embed=cls_embed_interp)
+        # img_stu_pred = model_output_dict['pred_stu']
 
-        if self.objective == 'pred_noise':
-            # img_stu_pred is the predicted noises. Subtract it from img_interp to get the predicted image.
-            img_stu_pred = self.predict_start_from_noise(img_noisy_interp, t2, img_stu_pred)
+        #if self.objective == 'pred_noise':
+        #    # img_stu_pred is the predicted noises. Subtract it from img_interp to get the predicted image.
+        #    img_stu_pred = self.predict_start_from_noise(img_noisy_interp, t2, img_stu_pred)
         # otherwise, objective is 'pred_x0', and pred_interp is already the predicted image.
+        
+        img_stu_pred, _ = self.p_sample_loop(img_noisy_interp.shape, noise=img_noisy_interp, 
+                                             classes_or_embed=cls_embed_interp, 
+                                             partial_steps=self.cls_guide_denoise_steps)
 
         if self.iter_count % 1000 == 0:
             local_rank = int(os.environ.get('LOCAL_RANK', 0))
@@ -965,13 +983,17 @@ class GaussianDiffusion(nn.Module):
         # to reduce unnecessary compute.
         # Shouldn't train the teacher using class guidance, as the teacher is specialized 
         # to handle easier (less noisy) images.
-        model_output_dict = self.denoise_fn(img_noisy, t, cls_embed=cls_embed, img_tea=None)
-        img_stu_pred = model_output_dict['pred_stu']
+        #model_output_dict = self.denoise_fn(img_noisy, t, classes_or_embed=cls_embed, img_tea=None)
+        #img_stu_pred = model_output_dict['pred_stu']
 
-        if self.objective == 'pred_noise':
-            # img_stu_pred is the predicted noises. Subtract it from img_noisy to get the predicted image.
-            img_stu_pred = self.predict_start_from_noise(img_noisy, t, img_stu_pred)
+        #if self.objective == 'pred_noise':
+        #    # img_stu_pred is the predicted noises. Subtract it from img_noisy to get the predicted image.
+        #    img_stu_pred = self.predict_start_from_noise(img_noisy, t, img_stu_pred)
         # otherwise, objective is 'pred_x0', and img_stu_pred is already the predicted image.
+
+        img_stu_pred, _ = self.p_sample_loop(img_noisy.shape, noise=img_noisy, 
+                                             classes_or_embed=cls_embed, 
+                                             partial_steps=self.cls_guide_denoise_steps)
 
         if self.iter_count % 1000 == 0:
             local_rank = int(os.environ.get('LOCAL_RANK', 0))
@@ -1094,7 +1116,7 @@ class GaussianDiffusion(nn.Module):
             if exists(x_tea):
                 unnorm_save_image(x_tea, f'{self.sample_dir}/{self.iter_count}-tea.png')
 
-        model_output_dict    = self.denoise_fn(x, t, classes=classes, img_tea=x_tea)
+        model_output_dict    = self.denoise_fn(x, t, classes_or_embed=classes, img_tea=x_tea)
         pred_stu, pred_tea   = model_output_dict['pred_stu'],   model_output_dict['pred_tea']
         noise_feat, tea_feat = model_output_dict['noise_feat'], model_output_dict['tea_feat']
 
