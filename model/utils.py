@@ -532,3 +532,15 @@ def fast_randn(*shape, device='cpu'):
 
 def fast_randn_like(tens):
     return fast_randn(tens.shape, device=tens.device)
+
+
+# Clamp with gradients to clamped elements.
+# https://discuss.pytorch.org/t/exluding-torch-clamp-from-backpropagation-as-tf-stop-gradient-in-tensorflow/52404/2
+class Clamp11(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, input):
+        return input.clamp(min=-1, max=1)
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        return grad_output.clone()

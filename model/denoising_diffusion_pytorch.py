@@ -12,7 +12,7 @@ from einops import rearrange
 from .laplacian import LapLoss
 from .utils import timm_extract_features, print0, exists, exists_add, repeat_interleave, \
                    default, normalize_to_neg_one_to_one, unnormalize_to_zero_to_one, unnorm_save_image, \
-                   UnlabeledDataset, LabeledDataset, fast_randn, fast_randn_like
+                   UnlabeledDataset, LabeledDataset, fast_randn, fast_randn_like, Clamp11
 import os
 import copy
 
@@ -665,7 +665,9 @@ class GaussianDiffusion(nn.Module):
         self.loss_type = loss_type
         self.consist_loss_type = consist_loss_type
         self.laploss_fun    = LapLoss()
-        
+        clamp01_inst = Clamp11()
+        self.clamp11 = clamp01_inst.apply
+
         # helper function to register buffer from float64 to float32
 
         register_buffer = lambda name, val: self.register_buffer(name, val.to(torch.float32))
@@ -726,7 +728,8 @@ class GaussianDiffusion(nn.Module):
             raise ValueError(f'unknown objective {self.objective}')
 
         if clip_denoised:
-            x_start.clamp_(-1., 1.)
+            #x_start.clamp_(-1., 1.)
+            self.clamp11(x_start)
 
         model_mean, posterior_variance, posterior_log_variance = self.q_posterior(x_start = x_start, x_t = x, t = t)
         return model_mean, posterior_variance, posterior_log_variance
@@ -902,7 +905,7 @@ class GaussianDiffusion(nn.Module):
         img_stu_pred, _ = self.p_sample_loop(img_noisy_interp.shape, noise=img_noisy_interp, 
                                              classes_or_embed=cls_embed_interp, 
                                              partial_steps=self.cls_guide_denoise_steps,
-                                             clip_denoised=False)
+                                             clip_denoised=True)
 
         if self.iter_count % 1000 == 0:
             local_rank = int(os.environ.get('LOCAL_RANK', 0))
@@ -998,7 +1001,7 @@ class GaussianDiffusion(nn.Module):
         img_stu_pred, _ = self.p_sample_loop(img_noisy.shape, noise=img_noisy, 
                                              classes_or_embed=cls_embed, 
                                              partial_steps=self.cls_guide_denoise_steps,
-                                             clip_denoised=False)
+                                             clip_denoised=True)
 
         if self.iter_count % 1000 == 0:
             local_rank = int(os.environ.get('LOCAL_RANK', 0))
