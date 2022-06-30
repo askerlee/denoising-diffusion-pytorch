@@ -745,7 +745,8 @@ class GaussianDiffusion(nn.Module):
         return model_mean + nonzero_mask * (0.5 * model_log_variance).exp() * noise
 
     # Sampled image pixels are between [-1, 1]. Need to unnormalize_to_zero_to_one() before output.
-    def p_sample_loop(self, shape, noise=None, classes_or_embed=None, partial_steps=-1):
+    def p_sample_loop(self, shape, noise=None, classes_or_embed=None, 
+                      partial_steps=-1, clip_denoised=True):
         device = self.betas.device
 
         b = shape[0]
@@ -768,7 +769,8 @@ class GaussianDiffusion(nn.Module):
             t0 = self.num_timesteps - partial_steps
 
         for i in reversed(range(t0, self.num_timesteps)):
-            img = self.p_sample(img, torch.full((b,), i, device=device, dtype=torch.long), classes_or_embed=classes_or_embed)
+            img = self.p_sample(img, torch.full((b,), i, device=device, dtype=torch.long), 
+                                classes_or_embed=classes_or_embed, clip_denoised=clip_denoised)
 
         return img, classes_or_embed
 
@@ -899,7 +901,8 @@ class GaussianDiffusion(nn.Module):
         
         img_stu_pred, _ = self.p_sample_loop(img_noisy_interp.shape, noise=img_noisy_interp, 
                                              classes_or_embed=cls_embed_interp, 
-                                             partial_steps=self.cls_guide_denoise_steps)
+                                             partial_steps=self.cls_guide_denoise_steps,
+                                             clip_denoised=False)
 
         if self.iter_count % 1000 == 0:
             local_rank = int(os.environ.get('LOCAL_RANK', 0))
@@ -994,7 +997,8 @@ class GaussianDiffusion(nn.Module):
 
         img_stu_pred, _ = self.p_sample_loop(img_noisy.shape, noise=img_noisy, 
                                              classes_or_embed=cls_embed, 
-                                             partial_steps=self.cls_guide_denoise_steps)
+                                             partial_steps=self.cls_guide_denoise_steps,
+                                             clip_denoised=False)
 
         if self.iter_count % 1000 == 0:
             local_rank = int(os.environ.get('LOCAL_RANK', 0))
