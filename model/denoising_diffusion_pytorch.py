@@ -744,6 +744,7 @@ class GaussianDiffusion(nn.Module):
         nonzero_mask = (1 - (t == 0).float()).reshape(b, *((1,) * (len(x.shape) - 1)))
         return model_mean + nonzero_mask * (0.5 * model_log_variance).exp() * noise
 
+    # Sampled image pixels are between [-1, 1]. Need to unnormalize_to_zero_to_one() before output.
     def p_sample_loop(self, shape, noise=None, classes_or_embed=None, partial_steps=-1):
         device = self.betas.device
 
@@ -769,7 +770,6 @@ class GaussianDiffusion(nn.Module):
         for i in reversed(range(t0, self.num_timesteps)):
             img = self.p_sample(img, torch.full((b,), i, device=device, dtype=torch.long), classes_or_embed=classes_or_embed)
 
-        img = unnormalize_to_zero_to_one(img)
         return img, classes_or_embed
 
     @torch.no_grad()
@@ -777,6 +777,7 @@ class GaussianDiffusion(nn.Module):
         image_size = self.image_size
         channels = self.channels
         img, classes = self.p_sample_loop((batch_size, channels, image_size, image_size))
+        img = unnormalize_to_zero_to_one(img)
         # Find nearest neighbors in dataset.
         if exists(dataset):
             if exists(classes):
