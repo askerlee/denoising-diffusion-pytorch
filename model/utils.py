@@ -535,12 +535,27 @@ def fast_randn_like(tens):
 
 
 # Clamp with gradients to clamped elements.
-# https://discuss.pytorch.org/t/exluding-torch-clamp-from-backpropagation-as-tf-stop-gradient-in-tensorflow/52404/2
-class Clamp11(torch.autograd.Function):
+# https://discuss.pytorch.org/t/exluding-torch-clamp-from-backpropagation-as-tf-stop-gradient-in-tensorflow/52404/6
+class DifferentiableClamp(torch.autograd.Function):
+    """
+    In the forward pass this operation behaves like torch.clamp.
+    But in the backward pass its gradient is 1 everywhere, as if instead of clamp one had used the identity function.
+    """
+
     @staticmethod
-    def forward(ctx, input):
-        return input.clamp(min=-1, max=1)
+    def forward(ctx, input, min, max):
+        return input.clamp(min=min, max=max)
 
     @staticmethod
     def backward(ctx, grad_output):
-        return grad_output.clone()
+        return grad_output.clone(), None, None
+
+
+def dclamp(input, min, max):
+    """
+    Like torch.clamp, but with a constant 1-gradient.
+    :param input: The input that is to be clamped.
+    :param min: The minimum value of the output.
+    :param max: The maximum value of the output.
+    """
+    return DifferentiableClamp.apply(input, min, max)

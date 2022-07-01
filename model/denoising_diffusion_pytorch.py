@@ -12,7 +12,7 @@ from einops import rearrange
 from .laplacian import LapLoss
 from .utils import timm_extract_features, print0, exists, exists_add, repeat_interleave, \
                    default, normalize_to_neg_one_to_one, unnormalize_to_zero_to_one, unnorm_save_image, \
-                   UnlabeledDataset, LabeledDataset, fast_randn, fast_randn_like, Clamp11
+                   UnlabeledDataset, LabeledDataset, fast_randn, fast_randn_like, dclamp
 import os
 import copy
 
@@ -665,8 +665,6 @@ class GaussianDiffusion(nn.Module):
         self.loss_type = loss_type
         self.consist_loss_type = consist_loss_type
         self.laploss_fun    = LapLoss()
-        clamp01_inst = Clamp11()
-        self.clamp11 = clamp01_inst.apply
 
         # helper function to register buffer from float64 to float32
 
@@ -729,7 +727,7 @@ class GaussianDiffusion(nn.Module):
 
         if clip_denoised:
             #x_start.clamp_(-1., 1.)
-            self.clamp11(x_start)
+            x_start = dclamp(x_start, -1., 1.)
 
         model_mean, posterior_variance, posterior_log_variance = self.q_posterior(x_start = x_start, x_t = x, t = t)
         return model_mean, posterior_variance, posterior_log_variance
