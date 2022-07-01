@@ -563,7 +563,10 @@ def cosine_beta_schedule(num_timesteps, s = 0.008):
 
 def linear_alpha_schedule(num_timesteps):
     steps = num_timesteps + 1
-    alphas_cumprod = torch.linspace(1, 0, steps, dtype = torch.float64)
+    # Avoid setting minimal alphas_cumprod to 0. 
+    # Otherwise later sqrt_recip_alphas_cumprod will be 1000, causing NaNs.
+    # Setting minimal alphas_cumprod to 0.0064**2, then sqrt_recip_alphas_cumprod[-1] = 156.25.
+    alphas_cumprod = torch.linspace(1, 0.0064**2, steps, dtype = torch.float64)
     alphas_cumprod = alphas_cumprod / alphas_cumprod[0]
     betas = 1 - (alphas_cumprod[1:] / alphas_cumprod[:-1])
     return torch.clip(betas, 0, 0.999)
@@ -659,6 +662,7 @@ class GaussianDiffusion(nn.Module):
             breakpoint()
 
         alphas = 1. - betas
+        # If using linear alpha schedule, alphas_cumprod[-1] = 4.1E-5.
         alphas_cumprod = torch.cumprod(alphas, axis=0)
         alphas_cumprod_prev = F.pad(alphas_cumprod[:-1], (1, 0), value = 1.)
 
@@ -679,6 +683,7 @@ class GaussianDiffusion(nn.Module):
         register_buffer('sqrt_alphas_cumprod', torch.sqrt(alphas_cumprod))
         register_buffer('sqrt_one_minus_alphas_cumprod', torch.sqrt(1. - alphas_cumprod))
         register_buffer('log_one_minus_alphas_cumprod', torch.log(1. - alphas_cumprod))
+        # If using linear alpha schedule, torch.sqrt(1. / alphas_cumprod)[-1] = 156.25.
         register_buffer('sqrt_recip_alphas_cumprod', torch.sqrt(1. / alphas_cumprod))
         register_buffer('sqrt_recipm1_alphas_cumprod', torch.sqrt(1. / alphas_cumprod - 1))
 
