@@ -710,11 +710,16 @@ class GaussianDiffusion(nn.Module):
         )
 
     def q_posterior(self, x_start, x_t, t):
+        # When t is close to self.num_timesteps, x_start's coefficients are close to 0 (0.01~0.02), and 
+        # x_t's coefficients are close to 1 (0.98~0.99).
+        # This means posterior_mean is still dominated by x_t, the noisy image.
         posterior_mean = (
             extract_tensor(self.posterior_mean_coef1, t, x_t.shape) * x_start +
             extract_tensor(self.posterior_mean_coef2, t, x_t.shape) * x_t
         )
+        # When t > 900, posterior_variance \in [0.01, 0.03].
         posterior_variance = extract_tensor(self.posterior_variance, t, x_t.shape)
+        # When t > 900, posterior_log_variance_clipped \in [-5, -3].
         posterior_log_variance_clipped = extract_tensor(self.posterior_log_variance_clipped, t, x_t.shape)
         return posterior_mean, posterior_variance, posterior_log_variance_clipped
 
@@ -734,6 +739,8 @@ class GaussianDiffusion(nn.Module):
             #x_start.clamp_(-1., 1.)
             x_start = dclamp(x_start, -1., 1.)
 
+        # x_start is the denoised & clamped image. x is the noisy image.
+        # When t > 900, posterior_log_variance \in [-5, -3].
         model_mean, posterior_variance, posterior_log_variance = self.q_posterior(x_start = x_start, x_t = x, t = t)
         return model_mean, posterior_variance, posterior_log_variance
 
@@ -748,10 +755,12 @@ class GaussianDiffusion(nn.Module):
         noise = noise_like(x.shape, device, repeat_noise)
         # no noise when t == 0
         nonzero_mask = (1 - (t == 0).float()).reshape(b, *((1,) * (len(x.shape) - 1)))
+        # When t > 900, model_log_variance \in [-5, -3]. 
+        # (0.5 * model_log_variance).exp() \in [0.10, 0.25]
         return model_mean + nonzero_mask * (0.5 * model_log_variance).exp() * noise
 
     # Sampled image pixels are between [-1, 1]. Need to unnormalize_to_zero_to_one() before output.
-    def p_sample_loop(self, shape, t=None, noise=None, classes_or_embed=None, 
+    def p_sample_loop(self, shape, t=None, t_gap=1, noise=None, classes_or_embed=None, 
                       partial_steps=-1, clip_denoised=True):
         device = self.betas.device
 
@@ -774,9 +783,10 @@ class GaussianDiffusion(nn.Module):
             # Only take partial steps (e.g., 2 steps).
             num_timesteps = partial_steps
 
+        # if t is None, then initialize t to T-1. Otherwise use the passed in t.
         t = default(t, torch.full((b,), self.num_timesteps - 1, device=device, dtype=torch.long))
         for i in range(num_timesteps):
-            img = self.p_sample(img, t - i, classes_or_embed=classes_or_embed, 
+            img = self.p_sample(img, t - i * t_gap, classes_or_embed=classes_or_embed, 
                                 clip_denoised=clip_denoised)
 
         return img, classes_or_embed
@@ -906,7 +916,8 @@ class GaussianDiffusion(nn.Module):
         #    img_stu_pred = self.predict_start_from_noise(img_noisy_interp, t2, img_stu_pred)
         # otherwise, objective is 'pred_x0', and pred_interp is already the predicted image.
         
-        img_stu_pred, _ = self.p_sample_loop(img_noisy_interp.shape, t2, noise=img_noisy_interp, 
+        img_stu_pred, _ = self.p_sample_loop(img_noisy_interp.shape, t2, t_gap=100, 
+                                             noise=img_noisy_interp, 
                                              classes_or_embed=cls_embed_interp, 
                                              partial_steps=self.cls_guide_denoise_steps,
                                              clip_denoised=True)
@@ -1002,7 +1013,8 @@ class GaussianDiffusion(nn.Module):
         #    img_stu_pred = self.predict_start_from_noise(img_noisy, t, img_stu_pred)
         # otherwise, objective is 'pred_x0', and img_stu_pred is already the predicted image.
 
-        img_stu_pred, _ = self.p_sample_loop(img_noisy.shape, t, noise=img_noisy, 
+        img_stu_pred, _ = self.p_sample_loop(img_noisy.shape, t, t_gap=100, 
+                                             noise=img_noisy, 
                                              classes_or_embed=cls_embed, 
                                              partial_steps=self.cls_guide_denoise_steps,
                                              clip_denoised=True)
