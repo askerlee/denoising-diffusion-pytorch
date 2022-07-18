@@ -501,6 +501,7 @@ class Unet(nn.Module):
             x = attn(x)
             # All blocks above don't change feature resolution. Only upsample explicitly here.
             # upsample() is a 4x4 conv, stride-2 transposed conv.
+            # upsample() doesn't change number of channels.
             x = upsample(x)
 
         pred_stu = self.final_conv(x)
@@ -597,7 +598,6 @@ class GaussianDiffusion(nn.Module):
         cls_guide_use_head_feat = False,
         cls_guide_type = 'none',
         cls_guide_loss_weight = 0.01,
-        cls_guide_denoise_steps = 2,
         align_tea_stu_feat_weight = 0,
         sample_dir = 'samples',      
         debug = False,
@@ -635,7 +635,6 @@ class GaussianDiffusion(nn.Module):
         self.cls_guide_use_head_feat  = cls_guide_use_head_feat
         self.cls_guide_type             = cls_guide_type
         self.cls_guide_loss_weight      = cls_guide_loss_weight
-        self.cls_guide_denoise_steps    = cls_guide_denoise_steps
         self.align_tea_stu_feat_weight  = align_tea_stu_feat_weight
         self.sample_dir = sample_dir
         self.debug = debug
@@ -662,8 +661,10 @@ class GaussianDiffusion(nn.Module):
             breakpoint()
 
         alphas = 1. - betas
+        # alphas_cumprod: \bar{alpha}_t
         # If using linear alpha schedule, alphas_cumprod[-1] = 4.1E-5.
         alphas_cumprod = torch.cumprod(alphas, axis=0)
+        # alphas_cumprod_prev: \bar{alpha}_{t-1}
         alphas_cumprod_prev = F.pad(alphas_cumprod[:-1], (1, 0), value = 1.)
 
         self.loss_type = loss_type
@@ -681,14 +682,15 @@ class GaussianDiffusion(nn.Module):
         # calculations for diffusion q(x_t | x_{t-1}) and others
 
         register_buffer('sqrt_alphas_cumprod', torch.sqrt(alphas_cumprod))
+        # sqrt_one_minus_alphas_cumprod -> 1, as t -> T.
         register_buffer('sqrt_one_minus_alphas_cumprod', torch.sqrt(1. - alphas_cumprod))
-        register_buffer('log_one_minus_alphas_cumprod', torch.log(1. - alphas_cumprod))
-        # If using linear alpha schedule, torch.sqrt(1. / alphas_cumprod)[-1] = 156.25.
-        register_buffer('sqrt_recip_alphas_cumprod', torch.sqrt(1. / alphas_cumprod))
+        # sqrt_recip_alphas_cumprod -> a big number, as t -> T.
+        # If using linear alpha schedule & T = 1000, torch.sqrt(1. / alphas_cumprod)[-1] = 156.25.
+        register_buffer('sqrt_recip_alphas_cumprod',   torch.sqrt(1. / alphas_cumprod))
         register_buffer('sqrt_recipm1_alphas_cumprod', torch.sqrt(1. / alphas_cumprod - 1))
 
         # calculations for posterior q(x_{t-1} | x_t, x_0)
-
+        # posterior_variance: \tilde{beta}_t 
         posterior_variance = betas * (1. - alphas_cumprod_prev) / (1. - alphas_cumprod)
 
         # above: equal to 1. / (1. / (1. - alpha_cumprod_tm1) + alpha_t / beta_t)
@@ -698,11 +700,22 @@ class GaussianDiffusion(nn.Module):
         # below: log calculation clipped because the posterior variance is 0 at the beginning of the diffusion chain
 
         register_buffer('posterior_log_variance_clipped', torch.log(posterior_variance.clamp(min =1e-20)))
+        # posterior_mean_coef1: the coefficients of x_0 in the posterior mean
         register_buffer('posterior_mean_coef1', betas * torch.sqrt(alphas_cumprod_prev) / (1. - alphas_cumprod))
+        # posterior_mean_coef2: the coefficients of x_t in the posterior mean
         register_buffer('posterior_mean_coef2', (1. - alphas_cumprod_prev) * torch.sqrt(alphas) / (1. - alphas_cumprod))
 
-    # subtract noise from noisy x_t, and get the denoised image. noise is expected to have standard std.
+    # Inference pipeline:                 predict_start_from_noise           q_posterior
+    #                    Unet -> noise           ---------->        x_0        ------->    mu_t-1 (mean of x_t-1)
+    #                            + x_t
+    # Training pipeline:                  predict_start_from_noise
+    #                    Unet -> noise           ---------->        x_0    \ L1 loss
+    #                                                             - x_gt   /
+    
+    # subtract noise from noisy x_t, and get the denoised image x_0. noise is expected to have standard std.
     # sqrt_recipm1_alphas_cumprod_t scales the noise std to to the same std used to generate the noise.
+    # Eq.4: \sqrt{\bar{\alpha}_t)} x_0 + \sqrt{1 - \bar{\alpha}_t} \epsilon = x_t =>
+    #        x_0 = sqrt_recip_alphas_cumprod * x_t - sqrt_recipm1_alphas_cumprod * noise
     def predict_start_from_noise(self, x_t, t, noise):
         return (
             extract_tensor(self.sqrt_recip_alphas_cumprod, t, x_t.shape)   * x_t -
@@ -712,7 +725,7 @@ class GaussianDiffusion(nn.Module):
     def q_posterior(self, x_start, x_t, t):
         # When t is close to self.num_timesteps, x_start's coefficients are close to 0 (0.01~0.02), and 
         # x_t's coefficients are close to 1 (0.98~0.99).
-        # This means posterior_mean is still dominated by x_t, the noisy image.
+        # This means posterior_mean of x_{t-1} is still dominated by x_t, the noisy image.
         posterior_mean = (
             extract_tensor(self.posterior_mean_coef1, t, x_t.shape) * x_start +
             extract_tensor(self.posterior_mean_coef2, t, x_t.shape) * x_t
@@ -723,7 +736,7 @@ class GaussianDiffusion(nn.Module):
         posterior_log_variance_clipped = extract_tensor(self.posterior_log_variance_clipped, t, x_t.shape)
         return posterior_mean, posterior_variance, posterior_log_variance_clipped
 
-    # p_mean_variance() returns the denoised/generated image mean and noise variance.
+    # p_mean_variance() returns the slightly denoised (from t to t-1) image mean and noise variance.
     def p_mean_variance(self, x, t, classes_or_embed, clip_denoised: bool):
         model_output_dict = self.denoise_fn(x, t, classes_or_embed=classes_or_embed)
         model_output = model_output_dict['pred_stu']
@@ -739,13 +752,13 @@ class GaussianDiffusion(nn.Module):
             #x_start.clamp_(-1., 1.)
             x_start = dclamp(x_start, -1., 1.)
 
-        # x_start is the denoised & clamped image. x is the noisy image.
+        # x_start is the denoised & clamped image at t=0. x is the noisy image at t.
         # When t > 900, posterior_log_variance \in [-5, -3].
         model_mean, posterior_variance, posterior_log_variance = self.q_posterior(x_start = x_start, x_t = x, t = t)
         return model_mean, posterior_variance, posterior_log_variance
 
     # p_sample(), p_sample_loop(), sample() are used to do inference.
-    # p_sample() adds noise to image mean, according to noise variance.
+    # p_sample() adds noise to the posterior image mean, according to noise variance.
     # As p_sample() is called in every iteration in p_sample_loop(), 
     # it results in a stochastic denoising trajectory,
     # i.e., may generate different images given the same input noise.
@@ -761,7 +774,7 @@ class GaussianDiffusion(nn.Module):
 
     # Sampled image pixels are between [-1, 1]. Need to unnormalize_to_zero_to_one() before output.
     def p_sample_loop(self, shape, t=None, t_gap=1, noise=None, classes_or_embed=None, 
-                      partial_steps=-1, clip_denoised=True):
+                      clip_denoised=True):
         device = self.betas.device
 
         b = shape[0]
@@ -776,16 +789,9 @@ class GaussianDiffusion(nn.Module):
             # classes_or_embed is initialized as random classes.
             classes_or_embed = torch.randint(0, self.num_classes, (b,), device=device)
 
-        if partial_steps == -1:
-            # Take a full sample loop.
-            num_timesteps = self.num_timesteps
-        else:
-            # Only take partial steps (e.g., 2 steps).
-            num_timesteps = partial_steps
-
         # if t is None, then initialize t to T-1. Otherwise use the passed in t.
         t = default(t, torch.full((b,), self.num_timesteps - 1, device=device, dtype=torch.long))
-        for i in range(num_timesteps):
+        for i in range(self.num_timesteps):
             img = self.p_sample(img, t - i * t_gap, classes_or_embed=classes_or_embed, 
                                 clip_denoised=clip_denoised)
 
@@ -911,17 +917,11 @@ class GaussianDiffusion(nn.Module):
         # model_output_dict = self.denoise_fn(img_noisy_interp, t2, classes_or_embed=cls_embed_interp)
         # img_stu_pred = model_output_dict['pred_stu']
 
-        #if self.objective == 'pred_noise':
-        #    # img_stu_pred is the predicted noises. Subtract it from img_interp to get the predicted image.
-        #    img_stu_pred = self.predict_start_from_noise(img_noisy_interp, t2, img_stu_pred)
+        if self.objective == 'pred_noise':
+            # img_stu_pred is the predicted noises. Subtract it from img_interp to get the predicted image.
+            img_stu_pred = self.predict_start_from_noise(img_noisy_interp, t2, img_stu_pred)
         # otherwise, objective is 'pred_x0', and pred_interp is already the predicted image.
         
-        img_stu_pred, _ = self.p_sample_loop(img_noisy_interp.shape, t2, t_gap=100, 
-                                             noise=img_noisy_interp, 
-                                             classes_or_embed=cls_embed_interp, 
-                                             partial_steps=self.cls_guide_denoise_steps,
-                                             clip_denoised=True)
-
         if self.iter_count % 1000 == 0:
             local_rank = int(os.environ.get('LOCAL_RANK', 0))
             if local_rank <= 0:
@@ -1008,16 +1008,10 @@ class GaussianDiffusion(nn.Module):
         #model_output_dict = self.denoise_fn(img_noisy, t, classes_or_embed=cls_embed, img_tea=None)
         #img_stu_pred = model_output_dict['pred_stu']
 
-        #if self.objective == 'pred_noise':
-        #    # img_stu_pred is the predicted noises. Subtract it from img_noisy to get the predicted image.
-        #    img_stu_pred = self.predict_start_from_noise(img_noisy, t, img_stu_pred)
+        if self.objective == 'pred_noise':
+            # img_stu_pred is the predicted noises. Subtract it from img_noisy to get the predicted image.
+            img_stu_pred = self.predict_start_from_noise(img_noisy, t, img_stu_pred)
         # otherwise, objective is 'pred_x0', and img_stu_pred is already the predicted image.
-
-        img_stu_pred, _ = self.p_sample_loop(img_noisy.shape, t, t_gap=100, 
-                                             noise=img_noisy, 
-                                             classes_or_embed=cls_embed, 
-                                             partial_steps=self.cls_guide_denoise_steps,
-                                             clip_denoised=True)
 
         if self.iter_count % 1000 == 0:
             local_rank = int(os.environ.get('LOCAL_RANK', 0))
