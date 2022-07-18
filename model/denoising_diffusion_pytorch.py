@@ -528,6 +528,7 @@ class Unet(nn.Module):
                 x = attn(x)
                 # All blocks above don't change feature resolution. Only upsample explicitly here.
                 # upsample() is a 4x4 conv, stride-2 transposed conv.
+                # [64, 256, 16, 16] -> [64, 128, 32, 32] -> [64, 64, 64, 64] 
                 x = upsample(x)
 
             pred_tea = self.final_conv(x)
@@ -914,8 +915,8 @@ class GaussianDiffusion(nn.Module):
 
         # Setting the last param (img_tea) to None, so that teacher module won't be executed, 
         # to reduce unnecessary compute.
-        # model_output_dict = self.denoise_fn(img_noisy_interp, t2, classes_or_embed=cls_embed_interp)
-        # img_stu_pred = model_output_dict['pred_stu']
+        model_output_dict = self.denoise_fn(img_noisy_interp, t2, classes_or_embed=cls_embed_interp)
+        img_stu_pred = model_output_dict['pred_stu']
 
         if self.objective == 'pred_noise':
             # img_stu_pred is the predicted noises. Subtract it from img_interp to get the predicted image.
@@ -1005,8 +1006,8 @@ class GaussianDiffusion(nn.Module):
         # to reduce unnecessary compute.
         # Shouldn't train the teacher using class guidance, as the teacher is specialized 
         # to handle easier (less noisy) images.
-        #model_output_dict = self.denoise_fn(img_noisy, t, classes_or_embed=cls_embed, img_tea=None)
-        #img_stu_pred = model_output_dict['pred_stu']
+        model_output_dict = self.denoise_fn(img_noisy, t, classes_or_embed=cls_embed, img_tea=None)
+        img_stu_pred = model_output_dict['pred_stu']
 
         if self.objective == 'pred_noise':
             # img_stu_pred is the predicted noises. Subtract it from img_noisy to get the predicted image.
