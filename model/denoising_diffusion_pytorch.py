@@ -1171,11 +1171,11 @@ class GaussianDiffusion(nn.Module):
             else:
                 raise ValueError(f'unknown objective {self.objective}')
 
-            loss_stu += self.loss_fn_adaptscale(pred_stu, target)
+            loss_stu = loss_stu + self.loss_fn_adaptscale(pred_stu, target)
             if self.distillation_type != 'none':
                 pred_tea    = preds_tea[i]
-                loss_tea    = self.loss_fn_adaptscale(pred_tea, target)
-                loss_align_tea_stu += F.l1_loss(noise_feat, tea_feat.detach())
+                loss_tea    = loss_tea + self.loss_fn_adaptscale(pred_tea, target)
+                loss_align_tea_stu = loss_align_tea_stu + F.l1_loss(noise_feat, tea_feat.detach())
 
         loss_stu, loss_tea, loss_align_tea_stu = loss_stu / len(preds_stu), \
                                                  loss_tea / len(preds_stu), \
