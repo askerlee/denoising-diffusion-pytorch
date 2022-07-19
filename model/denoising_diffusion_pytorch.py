@@ -1110,6 +1110,11 @@ class GaussianDiffusion(nn.Module):
         else:
             raise ValueError(f'invalid loss type {self.loss_type}')
 
+    def loss_fn_adaptscale(self, pred, target):
+        if target.shape != pred.shape:
+            target = F.interpolate(target, pred.shape[2:], mode='bilinear', align_corners=False)
+        return self.loss_fn(pred, target)
+
     # compute the consistency loss. consist_loss_fn is a function, instead of property as loss_fn.
     def consist_loss_fn(self, feat_pred, feat_gt, reduction='mean'):
         if self.consist_loss_type == 'l1':
@@ -1166,10 +1171,10 @@ class GaussianDiffusion(nn.Module):
             else:
                 raise ValueError(f'unknown objective {self.objective}')
 
-            loss_stu += self.loss_fn(pred_stu, target)
+            loss_stu += self.loss_fn_adaptscale(pred_stu, target)
             if self.distillation_type != 'none':
                 pred_tea    = preds_tea[i]
-                loss_tea    = self.loss_fn(pred_tea, target)
+                loss_tea    = self.loss_fn_adaptscale(pred_tea, target)
                 loss_align_tea_stu += F.l1_loss(noise_feat, tea_feat.detach())
 
         loss_stu, loss_tea, loss_align_tea_stu = loss_stu / len(preds_stu), \
