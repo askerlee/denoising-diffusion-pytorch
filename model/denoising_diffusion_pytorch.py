@@ -52,6 +52,12 @@ class SinusoidalPosEmb(nn.Module):
 def Upsample(dim):
     return nn.ConvTranspose2d(dim, dim, 4, 2, 1)
 
+def OutConv(block_klass, dim, out_dim):
+    return nn.Sequential(
+            block_klass(dim, dim),
+            nn.Conv2d(dim, out_dim, 1)
+        )    
+
 def Downsample(dim):
     return nn.Conv2d(dim, dim, 4, 2, 1)
 
@@ -353,6 +359,8 @@ class Unet(nn.Module):
                 extra_up_dim = self.featnet_dim
         
         extra_up_dims = [ extra_up_dim ] + [0] * (num_resolutions - 1)
+        default_out_dim = channels * (1 if not learned_variance else 2)
+        self.out_dim = default(out_dim, default_out_dim)
                         
         for ind, (dim_in, dim_out) in enumerate(reversed(in_out[1:])):
             is_last = ind >= (num_resolutions - 1)
@@ -361,7 +369,8 @@ class Unet(nn.Module):
                 block_klass(dim_out * 2 + extra_up_dims[ind], dim_in, time_emb_dim = time_dim),
                 block_klass(dim_in, dim_in, time_emb_dim = time_dim),
                 Residual(PreNorm(dim_in, LinearAttention(dim_in, memory_size=memory_size))),
-                Upsample(dim_in) if not is_last else nn.Identity()
+                Upsample(dim_in) if not is_last else nn.Identity(),
+                OutConv(block_klass, dim_in, self.out_dim)
             ]))
 
         # Sharing ups seems to perform worse.
@@ -377,16 +386,9 @@ class Unet(nn.Module):
                     block_klass(dim_out * 2 + extra_up_dims[ind], dim_in, time_emb_dim = time_dim),
                     block_klass(dim_in, dim_in, time_emb_dim = time_dim),
                     Residual(PreNorm(dim_in, LinearAttention(dim_in, memory_size=memory_size))),
-                    Upsample(dim_in) if not is_last else nn.Identity()
+                    Upsample(dim_in) if not is_last else nn.Identity(),
+                    OutConv(block_klass, dim_in, self.out_dim)
                 ]))
-
-        default_out_dim = channels * (1 if not learned_variance else 2)
-        self.out_dim = default(out_dim, default_out_dim)
-
-        self.final_conv = nn.Sequential(
-            block_klass(dim, dim),
-            nn.Conv2d(dim, self.out_dim, 1)
-        )
 
     # extract_pre_feat(): extract features using a pretrained model.
     # use_head_feat: use the features that feat_extractor uses to do the final classification. 
@@ -490,7 +492,8 @@ class Unet(nn.Module):
         else:
             noise_feat = None
 
-        for ind, (block1, block2, attn, upsample) in enumerate(self.ups):
+        preds_stu = []
+        for ind, (block1, block2, attn, upsample, out_conv) in enumerate(self.ups):
             if ind == 0 and exists(noise_feat):
                 x = torch.cat((x, h[-ind-1], noise_feat), dim=1)
             else:
@@ -501,10 +504,12 @@ class Unet(nn.Module):
             x = attn(x)
             # All blocks above don't change feature resolution. Only upsample explicitly here.
             # upsample() is a 4x4 conv, stride-2 transposed conv.
-            # upsample() doesn't change number of channels.
+            # [64, 256, 16, 16] -> [64, 128, 32, 32] -> [64, 64, 64, 64].
+            # upsample() doesn't change the number of channels. 
+            # The channel numbers are doubled by block1().
             x = upsample(x)
-
-        pred_stu = self.final_conv(x)
+            pred_stu = out_conv(x)
+            preds_stu.append(pred_stu)
 
         # img_tea is provided. Do distillation.
         if self.distillation_type == 'tfrac' and exists(img_tea):
@@ -516,8 +521,9 @@ class Unet(nn.Module):
             tea_feat = None
 
         if self.distillation_type != 'none' and exists(tea_feat):
+            preds_tea = []
             x = mid_feat
-            for ind, (block1, block2, attn, upsample) in enumerate(self.ups_tea):
+            for ind, (block1, block2, attn, upsample, out_conv) in enumerate(self.ups_tea):
                 if ind == 0 and exists(tea_feat):
                     x = torch.cat((x, h[-ind-1], tea_feat), dim=1)
                 else:
@@ -528,15 +534,17 @@ class Unet(nn.Module):
                 x = attn(x)
                 # All blocks above don't change feature resolution. Only upsample explicitly here.
                 # upsample() is a 4x4 conv, stride-2 transposed conv.
-                # [64, 256, 16, 16] -> [64, 128, 32, 32] -> [64, 64, 64, 64] 
+                # [64, 256, 16, 16] -> [64, 128, 32, 32] -> [64, 64, 64, 64].
+                # upsample() doesn't change the number of channels. 
+                # The channel numbers are doubled by block1().                
                 x = upsample(x)
-
-            pred_tea = self.final_conv(x)
+                pred_tea = out_conv(x)
+                preds_tea.append(pred_tea)
 
         else:
-            pred_tea = None
+            preds_tea = None
 
-        return { 'pred_stu': pred_stu, 'pred_tea': pred_tea, 'noise_feat': noise_feat, 'tea_feat': tea_feat }
+        return { 'preds_stu': preds_stu, 'preds_tea': preds_tea, 'noise_feat': noise_feat, 'tea_feat': tea_feat }
 
 # gaussian diffusion trainer class
 # suppose t is a 1-d tensor of indices.
@@ -740,7 +748,7 @@ class GaussianDiffusion(nn.Module):
     # p_mean_variance() returns the slightly denoised (from t to t-1) image mean and noise variance.
     def p_mean_variance(self, x, t, classes_or_embed, clip_denoised: bool):
         model_output_dict = self.denoise_fn(x, t, classes_or_embed=classes_or_embed)
-        model_output = model_output_dict['pred_stu']
+        model_output = model_output_dict['preds_stu'][-1]
 
         if self.objective == 'pred_noise':
             x_start = self.predict_start_from_noise(x, t = t, noise = model_output)
@@ -916,7 +924,7 @@ class GaussianDiffusion(nn.Module):
         # Setting the last param (img_tea) to None, so that teacher module won't be executed, 
         # to reduce unnecessary compute.
         model_output_dict = self.denoise_fn(img_noisy_interp, t2, classes_or_embed=cls_embed_interp)
-        img_stu_pred = model_output_dict['pred_stu']
+        img_stu_pred = model_output_dict['preds_stu'][-1]
 
         if self.objective == 'pred_noise':
             # img_stu_pred is the predicted noises. Subtract it from img_interp to get the predicted image.
@@ -1007,7 +1015,7 @@ class GaussianDiffusion(nn.Module):
         # Shouldn't train the teacher using class guidance, as the teacher is specialized 
         # to handle easier (less noisy) images.
         model_output_dict = self.denoise_fn(img_noisy, t, classes_or_embed=cls_embed, img_tea=None)
-        img_stu_pred = model_output_dict['pred_stu']
+        img_stu_pred = model_output_dict['preds_stu'][-1]
 
         if self.objective == 'pred_noise':
             # img_stu_pred is the predicted noises. Subtract it from img_noisy to get the predicted image.
@@ -1136,34 +1144,37 @@ class GaussianDiffusion(nn.Module):
                 unnorm_save_image(x_tea, f'{self.sample_dir}/{self.iter_count}-tea.png')
 
         model_output_dict    = self.denoise_fn(x, t, classes_or_embed=classes, img_tea=x_tea)
-        pred_stu, pred_tea   = model_output_dict['pred_stu'],   model_output_dict['pred_tea']
+        preds_stu, preds_tea = model_output_dict['preds_stu'],  model_output_dict['preds_tea']
         noise_feat, tea_feat = model_output_dict['noise_feat'], model_output_dict['tea_feat']
 
-        if self.objective == 'pred_noise':
-            # Laplacian loss doesn't help. Instead, it makes convergence very slow.
-            if self.loss_type == 'lap':
-                target = x_start
-                # original pred_stu is predicted noise. Subtract it from noisy x to get the predicted x_start.
-                # LapLoss always compares the predicted x_start to the original x_start.
-                pred_stu = self.predict_start_from_noise(x, t, pred_stu)
-            else:
-                # Compare groundtruth noise vs. predicted noise.
-                target = noise
-        elif self.objective == 'pred_x0':
-            target = x_start
-        else:
-            raise ValueError(f'unknown objective {self.objective}')
+        loss_stu, loss_tea, loss_align_tea_stu = torch.zeros(3, device=x_start.device)
 
-        loss_stu = self.loss_fn(pred_stu, target)
-        if self.distillation_type != 'none':
-            loss_tea    = self.loss_fn(pred_tea, target)
-            if self.featnet_type != 'mini':
-                loss_align_tea_stu = F.l1_loss(noise_feat, tea_feat.detach())
+        # Compute the loss for each scale of the output image.
+        for i, pred_stu in enumerate(preds_stu):
+            if self.objective == 'pred_noise':
+                # Laplacian loss doesn't help. Instead, it makes convergence very slow.
+                if self.loss_type == 'lap':
+                    target = x_start
+                    # original pred_stu is predicted noise. Subtract it from noisy x to get the predicted x_start.
+                    # LapLoss always compares the predicted x_start to the original x_start.
+                    pred_stu = self.predict_start_from_noise(x, t, pred_stu)
+                else:
+                    # Compare groundtruth noise vs. predicted noise.
+                    target = noise
+            elif self.objective == 'pred_x0':
+                target = x_start
             else:
-                loss_align_tea_stu = torch.zeros_like(loss_stu)
-        else:
-            loss_tea = torch.tensor(0, device=x_start.device)
-            loss_align_tea_stu = torch.zeros_like(loss_stu)
+                raise ValueError(f'unknown objective {self.objective}')
+
+            loss_stu += self.loss_fn(pred_stu, target)
+            if self.distillation_type != 'none':
+                pred_tea    = preds_tea[i]
+                loss_tea    = self.loss_fn(pred_tea, target)
+                loss_align_tea_stu += F.l1_loss(noise_feat, tea_feat.detach())
+
+        loss_stu, loss_tea, loss_align_tea_stu = loss_stu / len(preds_stu), \
+                                                 loss_tea / len(preds_stu), \
+                                                 loss_align_tea_stu / len(preds_stu)
 
         if self.cls_guide_type != 'none':
             if self.cls_guide_type == 'single':
