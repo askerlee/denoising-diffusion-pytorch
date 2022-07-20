@@ -932,20 +932,21 @@ class GaussianDiffusion(nn.Module):
         # otherwise, objective is 'pred_x0', and pred_interp is already the predicted image.
         
         if self.iter_count % 1000 == 0:
+            cycle_idx = self.iter_count // 1000
             local_rank = int(os.environ.get('LOCAL_RANK', 0))
             if local_rank <= 0:
                 sample_dir = f'{self.sample_dir}/interp'
                 os.makedirs(sample_dir, exist_ok=True)
-                img_gtaug_save_path  = f'{sample_dir}/{self.iter_count}-{local_rank}-aug.png'
+                img_gtaug_save_path  = f'{sample_dir}/{cycle_idx}-{local_rank}-aug.png'
                 unnorm_save_image(img_gt,   img_gtaug_save_path,  nrow = 8)
-                #img_gtorig_save_path = f'{sample_dir}/{self.iter_count}-{local_rank}-orig.png'
+                #img_gtorig_save_path = f'{sample_dir}/{cycle_idx}-{local_rank}-orig.png'
                 #unnorm_save_image(img_orig, img_gtorig_save_path, nrow = 8)
 
                 #print("GT images for interpolation are saved to", img_gt_save_path)
-                img_noisy_save_path = f'{sample_dir}/{self.iter_count}-{local_rank}-noisy.png'
+                img_noisy_save_path = f'{sample_dir}/{cycle_idx}-{local_rank}-noisy.png'
                 unnorm_save_image(img_noisy_interp, img_noisy_save_path, nrow = 8)
                 #print("Noisy images for interpolation are saved to", img_noisy_save_path)
-                img_pred_save_path  = f'{sample_dir}/{self.iter_count}-{local_rank}-pred.png'
+                img_pred_save_path  = f'{sample_dir}/{cycle_idx}-{local_rank}-pred.png'
                 unnorm_save_image(img_stu_pred, img_pred_save_path, nrow = 8)
                 #print("Predicted images are saved to", img_pred_save_path)
 
@@ -1023,21 +1024,22 @@ class GaussianDiffusion(nn.Module):
         # otherwise, objective is 'pred_x0', and img_stu_pred is already the predicted image.
 
         if self.iter_count % 1000 == 0:
+            cycle_idx = self.iter_count // 1000
             local_rank = int(os.environ.get('LOCAL_RANK', 0))
             if local_rank <= 0:
                 sample_dir = f'{self.sample_dir}/single'
                 os.makedirs(sample_dir, exist_ok=True)
 
-                img_gtaug_save_path  = f'{sample_dir}/{self.iter_count}-{local_rank}-aug.png'
+                img_gtaug_save_path  = f'{sample_dir}/{cycle_idx}-{local_rank}-aug.png'
                 unnorm_save_image(img_gt2,   img_gtaug_save_path,  nrow = 8)
-                #img_gtorig_save_path = f'{sample_dir}/{self.iter_count}-{local_rank}-orig.png'
+                #img_gtorig_save_path = f'{sample_dir}/{cycle_idx}-{local_rank}-orig.png'
                 #unnorm_save_image(img_orig, img_gtorig_save_path, nrow = 8)
 
                 #print("GT images for single-image class guidance are saved to", img_gt_save_path)
-                img_noisy_save_path = f'{sample_dir}/{self.iter_count}-{local_rank}-noisy.png'
+                img_noisy_save_path = f'{sample_dir}/{cycle_idx}-{local_rank}-noisy.png'
                 unnorm_save_image(img_noisy, img_noisy_save_path, nrow = 8)
                 #print("Noisy images for single-image class guidance are saved to", img_noisy_save_path)
-                img_pred_save_path  = f'{sample_dir}/{self.iter_count}-{local_rank}-pred.png'
+                img_pred_save_path  = f'{sample_dir}/{cycle_idx}-{local_rank}-pred.png'
                 unnorm_save_image(img_stu_pred, img_pred_save_path, nrow = 8)
                 #print("Predicted images are saved to", img_pred_save_path)
 
