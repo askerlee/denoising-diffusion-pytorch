@@ -86,15 +86,22 @@ class PreNorm(nn.Module):
 # building block modules. Kernel size is fixed as 3.
 # No downsampling is done in Block, i.e., it outputs a tensor of the same (H,W) as the input.
 class Block(nn.Module):
-    def __init__(self, dim, dim_out, kernel_size=3, groups = 8):
+    def __init__(self, dim, dim_out, groups = 8):
         super().__init__()
-        self.block = nn.Sequential(
-            nn.Conv2d(dim, dim_out, kernel_size, padding = (kernel_size-1)//2 ),
-            nn.GroupNorm(groups, dim_out),
-            nn.SiLU()
-        )
-    def forward(self, x):
-        return self.block(x)
+        self.proj = nn.Conv2d(dim, dim_out, 3, padding = 1)
+        self.norm = nn.GroupNorm(groups, dim_out)
+        self.act = nn.SiLU()
+
+    def forward(self, x, scale_shift = None):
+        x = self.proj(x)
+        x = self.norm(x)
+
+        if exists(scale_shift):
+            scale, shift = scale_shift
+            x = x * (scale + 1) + shift
+
+        x = self.act(x)
+        return x
 
 # Different ResnetBlock's have different mlp (time embedding module).
 # No downsampling is done in ResnetBlock.
@@ -103,7 +110,7 @@ class ResnetBlock(nn.Module):
         super().__init__()
         self.mlp = nn.Sequential(
             nn.SiLU(),      # Sigmoid Linear Unit, aka swish. https://pytorch.org/docs/stable/_images/SiLU.png
-            nn.Linear(time_emb_dim, dim_out),
+            nn.Linear(time_emb_dim, dim_out * 2),
             nn.LayerNorm(dim_out)       # Newly added.
         ) if exists(time_emb_dim) else None
 
@@ -116,14 +123,13 @@ class ResnetBlock(nn.Module):
     def forward(self, x, time_emb = None):
         h = self.block1(x)
 
+        scale_shift = None
         if exists(self.mlp) and exists(time_emb):
-            time_emb = self.mlp(time_emb).permute(0, 3, 1, 2)
-            if time_emb.shape[2] > 1 and time_emb.shape[3] > 1:
-                time_emb = repeat_interleave(repeat_interleave(time_emb, h.shape[2] // time_emb.shape[2], dim=2), 
-                                             h.shape[3] // time_emb.shape[3], dim=3)
+            time_emb = self.mlp(time_emb)
+            time_emb = rearrange(time_emb, 'b c -> b c 1 1')
+            scale_shift = time_emb.chunk(2, dim = 1)
 
-            h = h + time_emb
-
+        h = self.block1(x, scale_shift = scale_shift)
         h = self.block2(h)
         return h + self.res_conv(x)
 

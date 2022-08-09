@@ -559,3 +559,19 @@ def dclamp(input, min, max):
     :param max: The maximum value of the output.
     """
     return DifferentiableClamp.apply(input, min, max)
+
+# https://github.com/Aftaab99/pytorch-multiple-style-transfer/blob/master/transformer_net.py
+class ConditionalInstanceNorm2d(nn.Module):
+    def __init__(self, num_features, num_classes):
+        super(ConditionalInstanceNorm2d, self).__init__()
+        self.num_features = num_features
+        self.inst_norm = nn.InstanceNorm2d(num_features, affine=False)
+        self.embed = nn.Embedding(num_classes, num_features * 2)
+        self.embed.weight.data[:, :num_features].normal_(1, 0.02)  # Initialise scale at N(1, 0.02)
+        self.embed.weight.data[:, num_features:].zero_()  # Initialise bias at 0
+
+    def forward(self, x, style_index):
+        out = self.inst_norm(x)
+        gamma, beta = self.embed(style_index).chunk(2, 1)
+        out = gamma.view(-1, self.num_features, 1, 1) * out + beta.view(-1, self.num_features, 1, 1)
+        return out    
