@@ -588,9 +588,11 @@ def linear_alpha_schedule(num_timesteps):
     return torch.clip(betas, 0, 0.999)
 
 # Original schedule used in https://github.com/hojonathanho/diffusion
-def linear_beta_schedule(num_timesteps, beta_start=0.0001, beta_end=0.02):
-    betas = torch.linspace(beta_start, beta_end, num_timesteps, dtype=torch.float64)
-    return betas
+def linear_beta_schedule(num_timesteps):
+    scale = 1000 / num_timesteps
+    beta_start = scale * 0.0001
+    beta_end = scale * 0.02
+    return torch.linspace(beta_start, beta_end, num_timesteps, dtype = torch.float64)
 
 class GaussianDiffusion(nn.Module):
     def __init__(
@@ -600,7 +602,7 @@ class GaussianDiffusion(nn.Module):
         image_size,
         channels = 3,
         num_timesteps = 1000,
-        alpha_beta_schedule = 'linb',
+        alpha_beta_schedule = 'cosb',
         loss_type = 'l1',
         consist_loss_type = 'cosine',
         objective = 'pred_noise',

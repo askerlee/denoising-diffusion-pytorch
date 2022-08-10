@@ -227,7 +227,7 @@ parser.add_argument('--times', dest='num_timesteps', type=int, default=1000,
 parser.add_argument('--mem', dest='memory_size', type=int, default=2048, 
                     help="Number of memory cells in each attention layer")
 parser.add_argument('--sched', dest='alpha_beta_schedule', type=str, choices=['cosb', 'lina', 'linb'], 
-                    default='lina', help="Type of alpha/beta schedule")
+                    default='cosb', help="Type of alpha/beta schedule")
 
 parser.add_argument('--losstype', dest='loss_type', type=str, choices=['l1', 'l2', 'lap'], default='l1', 
                     help="Type of image denoising loss")
