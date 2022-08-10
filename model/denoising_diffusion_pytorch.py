@@ -83,12 +83,12 @@ class PreNorm(nn.Module):
         x = self.norm(x)
         return self.fn(x)
 
-# building block modules. Kernel size is fixed as 3.
+# building block modules. Kernel size is usually 3.
 # No downsampling is done in Block, i.e., it outputs a tensor of the same (H,W) as the input.
 class Block(nn.Module):
-    def __init__(self, dim, dim_out, groups = 8):
+    def __init__(self, dim, dim_out, kernel_size=3, groups = 8):
         super().__init__()
-        self.proj = nn.Conv2d(dim, dim_out, 3, padding = 1)
+        self.proj = nn.Conv2d(dim, dim_out, kernel_size, padding = 1)
         self.norm = nn.GroupNorm(groups, dim_out)
         self.act = nn.SiLU()
 
