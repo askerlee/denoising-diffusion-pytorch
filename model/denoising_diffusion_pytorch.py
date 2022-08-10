@@ -111,7 +111,7 @@ class ResnetBlock(nn.Module):
         self.mlp = nn.Sequential(
             nn.SiLU(),      # Sigmoid Linear Unit, aka swish. https://pytorch.org/docs/stable/_images/SiLU.png
             nn.Linear(time_emb_dim, dim_out * 2),
-            nn.LayerNorm(dim_out)       # Newly added.
+            # nn.LayerNorm(dim_out * 2)       # Newly added.
         ) if exists(time_emb_dim) else None
 
         # block1 and block2 are ended with a group norm and a SiLU activation.
