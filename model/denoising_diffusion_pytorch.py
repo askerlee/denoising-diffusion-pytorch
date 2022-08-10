@@ -247,8 +247,8 @@ class Unet(nn.Module):
         # number of input channels
         self.channels = channels
 
-        # dim = 64, init_dim -> 42.
-        init_dim = default(init_dim, dim // 3 * 2)
+        # dim = 64, init_dim -> 64.
+        init_dim = default(init_dim, dim)
         # image size is the same after init_conv, as default stride=1.
         self.init_conv = nn.Conv2d(channels, init_dim, 7, padding = 3)
 
@@ -368,8 +368,8 @@ class Unet(nn.Module):
         default_out_dim = channels * (1 if not learned_variance else 2)
         self.out_dim = default(out_dim, default_out_dim)
                         
-        for ind, (dim_in, dim_out) in enumerate(reversed(in_out[1:])):
-            is_last = ind >= (num_resolutions - 1)
+        for ind, (dim_in, dim_out) in enumerate(reversed(in_out)):
+            is_last = ind == (len(in_out) - 1)
 
             self.ups.append(nn.ModuleList([
                 block_klass(dim_out * 2 + extra_up_dims[ind], dim_in, time_emb_dim = time_dim),
