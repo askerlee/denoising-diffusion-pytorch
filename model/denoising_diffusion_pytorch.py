@@ -298,11 +298,11 @@ class Unet(nn.Module):
         in_out = list(zip(dims[:-1], dims[1:]))
         num_resolutions = len(in_out)
 
-        block_klass = partial(ResnetBlock, groups = resnet_block_groups, time_emb_dim = time_dim)
-
         # time embeddings
         # Fixed sinosudal embedding, transformed by two linear layers.
         time_dim = dim * 4              # 256
+
+        block_klass = partial(ResnetBlock, groups = resnet_block_groups, time_emb_dim = time_dim)
 
         self.learned_sinusoidal_cond = learned_sinusoidal_cond
 
@@ -440,10 +440,10 @@ class Unet(nn.Module):
                 # miniature image / image features as teacher's priviliged information.
 
                 self.ups_tea.append(nn.ModuleList([
-                    block_klass(dim_out * 2 + extra_up_dim, dim_in),
-                    block_klass(dim_in, dim_in),
-                    Residual(PreNorm(dim_in, LinearAttention(dim_in, memory_size=memory_size))),
-                    Upsample(dim_in) if not is_last else nn.Conv2d(dim_out, dim_in, 3, padding = 1),
+                    block_klass(dim_out + dim_in + extra_up_dim, dim_out),
+                    block_klass(dim_out + dim_in, dim_out),
+                    Residual(PreNorm(dim_out, LinearAttention(dim_out, memory_size=memory_size))),
+                    Upsample(dim_out, dim_in) if not is_last else nn.Conv2d(dim_out, dim_in, 3, padding = 1),
                     # Each block has an OutConv layer, to output multiscale denoised images.
                     OutConv(block_klass, dim_in, init_dim, self.out_dim)
                 ]))
@@ -498,6 +498,7 @@ class Unet(nn.Module):
         for block1, block2, attn, downsample in self.downs:
             # the encoder only sees the time embedding, not the class embedding.
             x = block1(x, t)
+            h.append(x)
             x = block2(x, t)
             x = attn(x)
             h.append(x)
@@ -527,12 +528,13 @@ class Unet(nn.Module):
         preds_stu = []
         for ind, (block1, block2, attn, upsample, out_conv) in enumerate(self.ups):
             if ind == 0 and exists(noise_feat):
-                x = torch.cat((x, h[-ind-1], noise_feat), dim=1)
+                x = torch.cat((x, h[-(2*ind+1)], noise_feat), dim=1)
             else:
-                x = torch.cat((x, h[-ind-1]), dim=1)
+                x = torch.cat((x, h[-(2*ind+1)]), dim=1)
 
             # The decoder sees the sum of the time embedding and class embedding.
             x = block1(x, t_stu)
+            x = torch.cat((x, h[-(2*ind+2)]), dim=1)
             x = block2(x, t_stu)
             x = attn(x)
             # All blocks above don't change feature resolution. Only upsample explicitly here.
@@ -558,11 +560,12 @@ class Unet(nn.Module):
             x = mid_feat
             for ind, (block1, block2, attn, upsample, out_conv) in enumerate(self.ups_tea):
                 if ind == 0 and exists(tea_feat):
-                    x = torch.cat((x, h[-ind-1], tea_feat), dim=1)
+                    x = torch.cat((x, h[-(2*ind+1)], tea_feat), dim=1)
                 else:
-                    x = torch.cat((x, h[-ind-1]), dim=1)
+                    x = torch.cat((x, h[-(2*ind+1)]), dim=1)
 
                 x = block1(x, t_tea)
+                x = torch.cat((x, h[-(2*ind+2)]), dim=1)
                 x = block2(x, t_tea)
                 x = attn(x)
                 # All blocks above don't change feature resolution. Only upsample explicitly here.

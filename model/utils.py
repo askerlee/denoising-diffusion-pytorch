@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.utils import data
 from torchvision import transforms, utils
 import torch.distributed as dist
