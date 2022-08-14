@@ -534,7 +534,7 @@ def repeat_interleave(x, n, dim):
 def default(val, d):
     if exists(val):
         return val
-    return d() if isfunction(d) else d
+    return d() if callable(d) else d
 
 def normalize_to_neg_one_to_one(img):
     return img * 2 - 1
@@ -545,7 +545,10 @@ def unnormalize_to_zero_to_one(t):
 def unnorm_save_image(img, img_save_path, nrow):
     img = unnormalize_to_zero_to_one(img)
     utils.save_image(img, img_save_path, nrow=nrow)
-    
+
+def l2norm(t):
+    return F.normalize(t, dim = -1)
+
 def fast_randn(*shape, device='cpu'):
     if type(shape[0]) == tuple:
         shape = shape[0]

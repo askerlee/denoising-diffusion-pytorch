@@ -12,9 +12,15 @@ from einops import rearrange
 from .laplacian import LapLoss
 from .utils import timm_extract_features, extract_pre_feat, print0, exists, exists_add, repeat_interleave, \
                    default, normalize_to_neg_one_to_one, unnormalize_to_zero_to_one, unnorm_save_image, \
-                   UnlabeledDataset, LabeledDataset, fast_randn, fast_randn_like, dclamp
+                   UnlabeledDataset, LabeledDataset, fast_randn, fast_randn_like, dclamp, l2norm
 import os
 import copy
+from tqdm.auto import tqdm
+from collections import namedtuple
+from random import random
+
+ModelPrediction =  namedtuple('ModelPrediction', ['pred_noise', 'pred_x_start'])
+
 
 timm_model2dim = { 'resnet34': 512,
                    'resnet18': 512,
@@ -94,17 +100,17 @@ class OutConv(nn.Module):
         x = self.final_conv(x)
         return x
 
+# https://github.com/lucidrains/denoising-diffusion-pytorch/commit/eba44498d1b33749df6e183bdc0899cf2918a5f3
 class LayerNorm(nn.Module):
-    def __init__(self, dim, eps = 1e-5):
+    def __init__(self, dim):
         super().__init__()
-        self.eps = eps
         self.g = nn.Parameter(torch.ones(1, dim, 1, 1))
-        self.b = nn.Parameter(torch.zeros(1, dim, 1, 1))
 
     def forward(self, x):
+        eps = 1e-5 if x.dtype == torch.float32 else 1e-3
         var = torch.var(x, dim = 1, unbiased = False, keepdim = True)
         mean = torch.mean(x, dim = 1, keepdim = True)
-        return (x - mean) / (var + self.eps).sqrt() * self.g + self.b
+        return (x - mean) * (var + eps).rsqrt() * self.g
 
 class PreNorm(nn.Module):
     def __init__(self, dim, fn):
@@ -207,7 +213,8 @@ class LinearAttention(nn.Module):
         k = k.softmax(dim = -1)
 
         q = q * self.scale
-        # v = v / (h * w)
+        # rescale values to prevent linear attention from overflowing in fp16 setting.
+        v = v / (h * w)
 
         # context: c*c, it's like c centroids, each of c-dim. 
         # q is the weights ("soft membership") of each point belonging to each centroid. 
@@ -225,9 +232,9 @@ class LinearAttention(nn.Module):
 
 # Ordinary attention, without softmax.
 class Attention(nn.Module):
-    def __init__(self, dim, heads = 4, dim_head = 32, memory_size=0):
+    def __init__(self, dim, heads = 4, dim_head = 32, scale = 16, memory_size=0):
         super().__init__()
-        self.scale = dim_head ** -0.5
+        self.scale = scale # dim_head ** -0.5
         self.heads = heads
         hidden_dim = dim_head * heads
         self.memory_size = memory_size
@@ -248,10 +255,9 @@ class Attention(nn.Module):
 
         qkv = self.to_qkv(x_ext).chunk(3, dim = 1)
         q, k, v = map(lambda t: rearrange(t, 'b (h c) x y -> b h c (x y)', h = self.heads), qkv)
-        q = q * self.scale
+        q, k = map(l2norm, (q, k))
 
-        sim = einsum('b h d i, b h d j -> b h i j', q, k)
-        sim = sim - sim.amax(dim = -1, keepdim = True).detach()
+        sim = einsum('b h d i, b h d j -> b h i j', q, k) * self.scale
         attn = sim.softmax(dim = -1)
 
         out = einsum('b h i j, b h d j -> b h i d', attn, v)
@@ -270,6 +276,7 @@ class Unet(nn.Module):
         out_dim = None,
         dim_mults=(1, 2, 4, 8),
         channels = 3,
+        self_condition = False,
         resnet_block_groups = 8,
         memory_size = 1024,
         num_classes = -1,
@@ -287,11 +294,13 @@ class Unet(nn.Module):
 
         # number of input channels
         self.channels = channels
+        self.self_condition = self_condition
+        input_channels = channels * (2 if self_condition else 1)
 
         # dim = 64, init_dim -> 64.
         init_dim = default(init_dim, dim)
         # image size is the same after init_conv, as default stride=1.
-        self.init_conv = nn.Conv2d(channels, init_dim, 7, padding = 3)
+        self.init_conv = nn.Conv2d(input_channels, init_dim, 7, padding = 3)
 
         # init_conv + num_resolutions (4) layers.
         dims = [init_dim, *map(lambda m: dim * m, dim_mults)]
@@ -466,7 +475,11 @@ class Unet(nn.Module):
             self.cls_guide_feat_ext = self.cls_guide_feat_ext_backup
             self.cls_guide_feat_ext_backup = None
 
-    def forward(self, x, time, classes_or_embed=None, img_tea=None):
+    def forward(self, x, time, classes_or_embed=None, x_self_cond = None, img_tea=None):
+        if self.self_condition:
+            x_self_cond = default(x_self_cond, lambda: torch.zeros_like(x))
+            x = torch.cat((x_self_cond, x), dim = 1)
+
         init_noise = x
         x = self.init_conv(x)
         r = x.clone() 
@@ -631,8 +644,8 @@ class GaussianDiffusion(nn.Module):
         denoise_fn,
         *,
         image_size,
-        channels = 3,
         num_timesteps = 1000,
+        sampling_timesteps = None,
         alpha_beta_schedule = 'cosb',
         loss_type = 'l1',
         consist_loss_type = 'cosine',
@@ -650,21 +663,28 @@ class GaussianDiffusion(nn.Module):
         sample_dir = 'samples',      
         debug = False,
         sampleseed = 5678,
+        ddim_sampling_eta = 1.,
     ):
         super().__init__()
         if isinstance(denoise_fn, torch.nn.DataParallel):
             denoise_fn_channels = denoise_fn.module.channels
             denoise_fn_out_dim  = denoise_fn.module.out_dim
+            denoise_fn_self_condition = denoise_fn.module.self_condition
         else:
             denoise_fn_channels = denoise_fn.channels
             denoise_fn_out_dim  = denoise_fn.out_dim
+            denoise_fn_self_condition = denoise_fn.self_condition
 
         assert not (type(self) == GaussianDiffusion and denoise_fn_channels != denoise_fn_out_dim)
 
-        self.channels = channels
+        self.channels           = denoise_fn_channels
+        self.self_condition     = denoise_fn_self_condition
         self.image_size         = image_size
         self.denoise_fn         = denoise_fn    # Unet
         self.objective          = objective
+        assert objective in {'pred_noise', 'pred_x0'}, 'objective must be either pred_noise (predict noise) ' \
+                'or pred_x0 (predict image start)'
+
         self.featnet_type       = featnet_type
         self.distillation_type  = distillation_type
         self.distill_t_frac     = distill_t_frac if (self.distillation_type == 'tfrac') else -1
@@ -719,6 +739,13 @@ class GaussianDiffusion(nn.Module):
         self.consist_loss_type = consist_loss_type
         self.laploss_fun    = LapLoss()
 
+        # default num sampling timesteps to number of timesteps at training
+        self.sampling_timesteps = default(sampling_timesteps, num_timesteps) 
+
+        assert self.sampling_timesteps <= num_timesteps
+        self.is_ddim_sampling = self.sampling_timesteps < num_timesteps
+        self.ddim_sampling_eta = ddim_sampling_eta
+
         # helper function to register buffer from float64 to float32
 
         register_buffer = lambda name, val: self.register_buffer(name, val.to(torch.float32))
@@ -770,6 +797,12 @@ class GaussianDiffusion(nn.Module):
             extract_tensor(self.sqrt_recipm1_alphas_cumprod, t, x_t.shape) * noise
         )
 
+    def predict_noise_from_start(self, x_t, t, x0):
+        return (
+            (extract_tensor(self.sqrt_recip_alphas_cumprod, t, x_t.shape) * x_t - x0) / \
+             extract_tensor(self.sqrt_recipm1_alphas_cumprod, t, x_t.shape)
+        )
+
     def q_posterior(self, x_start, x_t, t):
         # When t is close to self.num_timesteps, x_start's coefficients are close to 0 (0.01~0.02), and 
         # x_t's coefficients are close to 1 (0.98~0.99).
@@ -784,17 +817,24 @@ class GaussianDiffusion(nn.Module):
         posterior_log_variance_clipped = extract_tensor(self.posterior_log_variance_clipped, t, x_t.shape)
         return posterior_mean, posterior_variance, posterior_log_variance_clipped
 
-    # p_mean_variance() returns the slightly denoised (from t to t-1) image mean and noise variance.
-    def p_mean_variance(self, x, t, classes_or_embed, clip_denoised: bool):
-        model_output_dict = self.denoise_fn(x, t, classes_or_embed=classes_or_embed)
+    def model_predictions(self, x, t, classes_or_embed, x_self_cond = None):
+        model_output_dict = self.denoise_fn(x, t, classes_or_embed, x_self_cond)
         model_output = model_output_dict['preds_stu'][-1]
 
         if self.objective == 'pred_noise':
-            x_start = self.predict_start_from_noise(x, t = t, noise = model_output)
+            pred_noise = model_output
+            x_start = self.predict_start_from_noise(x, t, model_output)
+
         elif self.objective == 'pred_x0':
+            pred_noise = self.predict_noise_from_start(x, t, model_output)
             x_start = model_output
-        else:
-            raise ValueError(f'unknown objective {self.objective}')
+
+        return ModelPrediction(pred_noise, x_start)
+
+    # p_mean_variance() returns the slightly denoised (from t to t-1) image mean and noise variance.
+    def p_mean_variance(self, x, t, classes_or_embed, x_self_cond = None, clip_denoised = True):
+        preds = self.model_predictions(x, t, classes_or_embed, x_self_cond)
+        x_start = preds.pred_x_start
 
         if clip_denoised:
             #x_start.clamp_(-1., 1.)
@@ -803,54 +843,100 @@ class GaussianDiffusion(nn.Module):
         # x_start is the denoised & clamped image at t=0. x is the noisy image at t.
         # When t > 900, posterior_log_variance \in [-5, -3].
         model_mean, posterior_variance, posterior_log_variance = self.q_posterior(x_start = x_start, x_t = x, t = t)
-        return model_mean, posterior_variance, posterior_log_variance
+        return model_mean, posterior_variance, posterior_log_variance, x_start
 
     # p_sample(), p_sample_loop(), sample() are used to do inference.
     # p_sample() adds noise to the posterior image mean, according to noise variance.
     # As p_sample() is called in every iteration in p_sample_loop(), 
     # it results in a stochastic denoising trajectory,
     # i.e., may generate different images given the same input noise.
-    def p_sample(self, x, t, classes_or_embed=None, clip_denoised=True, repeat_noise=False):
+    def p_sample(self, x, t: int, classes_or_embed=None, x_self_cond = None, clip_denoised=True, repeat_noise=False):
         b, *_, device = *x.shape, x.device
-        model_mean, _, model_log_variance = self.p_mean_variance(x=x, t=t, classes_or_embed=classes_or_embed, clip_denoised=clip_denoised)
-        noise = noise_like(x.shape, device, repeat_noise)
+        batched_times = torch.full((b,), t, device = x.device, dtype = torch.long)
+        model_mean, _, model_log_variance, x_start = self.p_mean_variance(x, batched_times, classes_or_embed, x_self_cond, clip_denoised=clip_denoised)
         # no noise when t == 0
-        nonzero_mask = (1 - (t == 0).float()).reshape(b, *((1,) * (len(x.shape) - 1)))
+        noise = noise_like(x.shape, device, repeat_noise) if t > 0 else 0.
         # When t > 900, model_log_variance \in [-5, -3]. 
         # (0.5 * model_log_variance).exp() \in [0.10, 0.25]
-        return model_mean + nonzero_mask * (0.5 * model_log_variance).exp() * noise
+        pred_img = model_mean + (0.5 * model_log_variance).exp() * noise
+        return pred_img, x_start     
 
     # Sampled image pixels are between [-1, 1]. Need to unnormalize_to_zero_to_one() before output.
-    def p_sample_loop(self, shape, t=None, t_gap=1, noise=None, classes_or_embed=None, 
+    def p_sample_loop(self, shape, noise=None, classes_or_embed=None, 
                       clip_denoised=True):
-        device = self.betas.device
+        batch, device = shape[0], self.betas.device
 
-        b = shape[0]
         if noise is None:
             img = fast_randn(shape, device=device)
         else:
             img = noise
 
+        x_start = None
+
         if self.cls_embed_type == 'none':
             classes_or_embed = None
         elif classes_or_embed is None:
             # classes_or_embed is initialized as random classes.
-            classes_or_embed = torch.randint(0, self.num_classes, (b,), device=device)
+            classes_or_embed = torch.randint(0, self.num_classes, (batch,), device=device)
 
-        # if t is None, then initialize t to T-1. Otherwise use the passed in t.
-        t = default(t, torch.full((b,), self.num_timesteps - 1, device=device, dtype=torch.long))
-        for i in range(self.num_timesteps):
-            img = self.p_sample(img, t - i * t_gap, classes_or_embed=classes_or_embed, 
-                                clip_denoised=clip_denoised)
+        for t in tqdm(reversed(range(0, self.num_timesteps)), desc = 'sampling loop time step'):
+            self_cond = x_start if self.self_condition else None
+            img, x_start = self.p_sample(img, t, classes_or_embed, self_cond,
+                                         clip_denoised=clip_denoised)
 
+        img = unnormalize_to_zero_to_one(img)
+        return img, classes_or_embed
+
+    @torch.no_grad()
+    def ddim_sample(self, shape, noise=None, classes_or_embed=None, clip_denoised = True):
+        batch, device, total_timesteps, sampling_timesteps, eta, objective = shape[0], self.betas.device, self.num_timesteps, self.sampling_timesteps, self.ddim_sampling_eta, self.objective
+
+        times = torch.linspace(0., total_timesteps, steps = sampling_timesteps + 2)[:-1]
+        times = list(reversed(times.int().tolist()))
+        time_pairs = list(zip(times[:-1], times[1:]))
+
+        if noise is None:
+            img = fast_randn(shape, device=device)
+        else:
+            img = noise
+
+        x_start = None
+
+        if self.cls_embed_type == 'none':
+            classes_or_embed = None
+        elif classes_or_embed is None:
+            # classes_or_embed is initialized as random classes.
+            classes_or_embed = torch.randint(0, self.num_classes, (batch,), device=device)
+
+        for time, time_next in tqdm(time_pairs, desc = 'sampling loop time step'):
+            alpha = self.alphas_cumprod_prev[time]
+            alpha_next = self.alphas_cumprod_prev[time_next]
+
+            time_cond = torch.full((batch,), time, device = device, dtype = torch.long)
+            self_cond = x_start if self.self_condition else None
+            pred_noise, x_start, *_ = self.model_predictions(img, time_cond, classes_or_embed, self_cond)
+
+            if clip_denoised:
+                x_start.clamp_(-1., 1.)
+
+            sigma = eta * ((1 - alpha / alpha_next) * (1 - alpha_next) / (1 - alpha)).sqrt()
+            c = ((1 - alpha_next) - sigma ** 2).sqrt()
+
+            noise = torch.randn_like(img) if time_next > 0 else 0.
+
+            img = x_start * alpha_next.sqrt() + \
+                  c * pred_noise + \
+                  sigma * noise
+
+        img = unnormalize_to_zero_to_one(img)
         return img, classes_or_embed
 
     @torch.no_grad()
     def sample(self, batch_size = 16, dataset=None):
-        image_size = self.image_size
-        channels = self.channels
-        img, classes = self.p_sample_loop((batch_size, channels, image_size, image_size))
-        img = unnormalize_to_zero_to_one(img)
+        image_size, channels = self.image_size, self.channels
+        sample_fn = self.p_sample_loop if not self.is_ddim_sampling else self.ddim_sample
+
+        img, classes = sample_fn((batch_size, channels, image_size, image_size))
         # Find nearest neighbors in dataset.
         if exists(dataset):
             if exists(classes):
@@ -885,7 +971,7 @@ class GaussianDiffusion(nn.Module):
         t_batch = torch.stack([torch.tensor(t, device=device)] * b)
         img = self.noisy_interpolate(x1, x2, t_batch, w)
         for i in reversed(range(0, t)):
-            img = self.p_sample(img, torch.full((b,), i, device=device, dtype=torch.long), classes=None)
+            img = self.p_sample(img, i, classes=None)
 
         return img
 
@@ -1189,7 +1275,18 @@ class GaussianDiffusion(nn.Module):
             if exists(x_tea):
                 unnorm_save_image(x_tea, f'{self.sample_dir}/{self.iter_count}-tea.png')
 
-        model_output_dict    = self.denoise_fn(x, t, classes_or_embed=classes, img_tea=x_tea)
+        # if doing self-conditioning, 50% of the time, predict x_start from current set of times
+        # and condition with unet with that
+        # this technique will slow down training by 25%, but seems to lower FID significantly
+        # https://github.com/lucidrains/denoising-diffusion-pytorch/commit/689593a5792512f81c159f7f441afcd2fcc26492
+        x_self_cond = None
+        if self.self_condition and random() < 0.5:
+            with torch.no_grad():
+                x_self_cond = self.model_predictions(x, t, classes_or_embed=classes).pred_x_start
+                x_self_cond.detach_()
+
+        model_output_dict    = self.denoise_fn(x, t, classes_or_embed=classes, 
+                                               x_self_cond=x_self_cond, img_tea=x_tea)
         preds_stu, preds_tea = model_output_dict['preds_stu'],  model_output_dict['preds_tea']
         noise_feat, tea_feat = model_output_dict['noise_feat'], model_output_dict['tea_feat']
 

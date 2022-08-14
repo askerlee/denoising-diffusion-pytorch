@@ -1,14 +1,17 @@
 import torch
+from collections import namedtuple
 from math import pi, sqrt, log as ln
 from inspect import isfunction
 from torch import nn, einsum
 from einops import rearrange
 
-from model.denoising_diffusion_pytorch import GaussianDiffusion, extract_tensor, unnormalize_to_zero_to_one
+from denoising_diffusion_pytorch.denoising_diffusion_pytorch import GaussianDiffusion, extract, unnormalize_to_zero_to_one
 
 # constants
 
 NAT = 1. / ln(2)
+
+ModelPrediction = namedtuple('ModelPrediction', ['pred_noise', 'pred_x_start', 'pred_variance'])
 
 # helper functions
 
@@ -22,7 +25,7 @@ def default(val, d):
 
 # tensor helpers
 
-def log(t, eps = 1e-12):
+def log(t, eps = 1e-15):
     return torch.log(t.clamp(min = eps))
 
 def meanflat(x):
@@ -67,21 +70,35 @@ def discretized_gaussian_log_likelihood(x, *, means, log_scales, thres = 0.999):
 class LearnedGaussianDiffusion(GaussianDiffusion):
     def __init__(
         self,
-        denoise_fn,
+        model,
         vb_loss_weight = 0.001,  # lambda was 0.001 in the paper
         *args,
         **kwargs
     ):
-        super().__init__(denoise_fn, *args, **kwargs)
-        assert denoise_fn.out_dim == (denoise_fn.channels * 2), 'dimension out of unet must be twice the number of channels for learned variance - you can also set the `learned_variance` keyword argument on the Unet to be `True`'
+        super().__init__(model, *args, **kwargs)
+        assert model.out_dim == (model.channels * 2), 'dimension out of unet must be twice the number of channels for learned variance - you can also set the `learned_variance` keyword argument on the Unet to be `True`'
         self.vb_loss_weight = vb_loss_weight
 
+    def model_predictions(self, x, t):
+        model_output = self.model(x, t)
+        model_output, pred_variance = model_output.chunk(2, dim = 1)
+
+        if self.objective == 'pred_noise':
+            pred_noise = model_output
+            x_start = self.predict_start_from_noise(x, t, model_output)
+
+        elif self.objective == 'pred_x0':
+            pred_noise = self.predict_noise_from_start(x, t, model_output)
+            x_start = model_output
+
+        return ModelPrediction(pred_noise, x_start, pred_variance)
+
     def p_mean_variance(self, *, x, t, clip_denoised, model_output = None):
-        model_output = default(model_output, lambda: self.denoise_fn(x, t))
+        model_output = default(model_output, lambda: self.model(x, t))
         pred_noise, var_interp_frac_unnormalized = model_output.chunk(2, dim = 1)
 
-        min_log = extract_tensor(self.posterior_log_variance_clipped, t, x.shape)
-        max_log = extract_tensor(torch.log(self.betas), t, x.shape)
+        min_log = extract(self.posterior_log_variance_clipped, t, x.shape)
+        max_log = extract(torch.log(self.betas), t, x.shape)
         var_interp_frac = unnormalize_to_zero_to_one(var_interp_frac_unnormalized)
 
         model_log_variance = var_interp_frac * max_log + (1 - var_interp_frac) * min_log
@@ -102,7 +119,7 @@ class LearnedGaussianDiffusion(GaussianDiffusion):
 
         # model output
 
-        model_output = self.denoise_fn(x_t, t)
+        model_output = self.model(x_t, t)
 
         # calculating kl loss for learned variance (interpolation)
 

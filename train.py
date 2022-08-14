@@ -11,7 +11,7 @@ from torch.utils.data.distributed import DistributedSampler
 from torch.utils import data
 import os
 import copy
-from tqdm import tqdm
+from tqdm.auto import tqdm
 from pathlib import Path
 import random
 import numpy as np
@@ -26,6 +26,7 @@ class Trainer(object):
         local_rank = -1,
         world_size = 1,
         ema_decay = 0.995,
+        adam_betas = (0.9, 0.99),
         train_batch_size = 32,
         train_lr = 1e-4,
         weight_decay = 0,
@@ -34,7 +35,7 @@ class Trainer(object):
         grad_clip = -1,
         amp = True,
         step_start_ema = 2000,
-        update_ema_every = 10,
+        ema_update_every = 10,
         save_and_sample_every = 1000,
         sample_dir = 'samples',
         cp_dir = 'checkpoints',
@@ -46,7 +47,7 @@ class Trainer(object):
         self.model = diffusion_model
         self.ema = EMA(ema_decay)
         self.ema_model = copy.deepcopy(self.model)
-        self.update_ema_every = update_ema_every
+        self.ema_update_every = ema_update_every
 
         self.step_start_ema = step_start_ema
         self.save_and_sample_every = save_and_sample_every
@@ -72,7 +73,7 @@ class Trainer(object):
                                         shuffle = shuffle, pin_memory = True, 
                                         drop_last = True, num_workers = num_workers),
                         sampler)
-        self.opt = Adam(diffusion_model.parameters(), lr=train_lr, weight_decay=weight_decay)
+        self.opt = Adam(diffusion_model.parameters(), lr=train_lr, weight_decay=weight_decay, betas=adam_betas)
 
         self.step = 0
 
@@ -151,24 +152,27 @@ class Trainer(object):
                     loss_stu = loss_dict['loss_stu'].mean()
                     loss_stu = reduce_tensor(loss_stu, self.world_size)
                     self.loss_meter.update('loss_stu', loss_stu.item())
-                    avg_loss_stu = self.loss_meter.avg['disp']['loss_stu']
-                    desc_items = [ f's {loss_stu.item():.3f}/{avg_loss_stu:.3f}' ]
 
                     if args.distillation_type != 'none':
                         loss_tea = loss_dict['loss_tea'].mean()
                         loss_tea = reduce_tensor(loss_tea, self.world_size)
                         self.loss_meter.update('loss_tea', loss_tea.item())
-                        avg_loss_tea = self.loss_meter.avg['disp']['loss_tea']
-                        desc_items.append( f't {loss_tea.item():.3f}/{avg_loss_tea:.3f}' )
                     if args.cls_guide_loss_weight > 0:
                         loss_cls_guide = loss_dict['loss_cls_guide'].mean()
                         loss_cls_guide = reduce_tensor(loss_cls_guide, self.world_size)
                         self.loss_meter.update('loss_cls_guide', loss_cls_guide.item())
-                        avg_loss_cls_guide = self.loss_meter.avg['disp']['loss_cls_guide']
-                        desc_items.append( f'c {loss_cls_guide.item():.3f}/{avg_loss_cls_guide:.3f}' )
 
-                    desc = ', '.join(desc_items)
-                    pbar.set_description(desc)
+                avg_loss_stu = self.loss_meter.avg['disp']['loss_stu']
+                desc_items = [ f's {loss_stu.item():.3f}/{avg_loss_stu:.3f}' ]
+                if args.distillation_type != 'none':
+                    avg_loss_tea = self.loss_meter.avg['disp']['loss_tea']
+                    desc_items.append( f't {loss_tea.item():.3f}/{avg_loss_tea:.3f}' )
+                if args.cls_guide_loss_weight > 0:
+                    avg_loss_cls_guide = self.loss_meter.avg['disp']['loss_cls_guide']
+                    desc_items.append( f'c {loss_cls_guide.item():.3f}/{avg_loss_cls_guide:.3f}' )
+
+                desc = ', '.join(desc_items)
+                pbar.set_description(desc)
 
                 if self.grad_clip > 0:
                     torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
@@ -179,7 +183,7 @@ class Trainer(object):
 
                 self.model.denoise_fn.post_update()
                 
-                if self.step % self.update_ema_every == 0:
+                if self.step % self.ema_update_every == 0:
                     self.step_ema()
 
                 if self.step != 0 and self.step % self.save_and_sample_every == 0:
@@ -203,7 +207,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--seed', type=int, default=1234, help="Random seed for initialization and training")
 parser.add_argument('--sampleseed', type=int, default=5678, help="Random seed for sampling")
 
-parser.add_argument('--lr', type=float, default=4e-4, help="Learning rate")
+parser.add_argument('--lr', type=float, default=2e-4, help="Learning rate")
 parser.add_argument('--bs', dest='batch_size', type=int, default=32, help="Batch size")
 parser.add_argument('--clip', dest='grad_clip', type=float, default=-1, help="Gradient clipping")
 parser.add_argument('--cp', type=str, dest='cp_path', default=None, help="The path of a model checkpoint")
@@ -270,6 +274,8 @@ parser.add_argument('--clsheadfeat', dest='cls_guide_use_head_feat', action='sto
                     help='Use the collapsed feature maps when computing consistency losses (e.g., class guidance loss).')
 parser.add_argument('--clssharetea', dest='cls_guide_shares_tea_feat_ext', action='store_true', 
                     help='Use the teacher feature extractor weights for the consistency loss.')
+parser.add_argument('--selfcond', dest='self_condition', action='store_true', 
+                    help='Use self-conditioning for lower FID.')
 
 torch.set_printoptions(sci_mode=False)
 args = parser.parse_args()
@@ -343,6 +349,7 @@ unet = Unet(
     dim_mults = (1, 2, 4, 8),
     # with_time_emb = True, do time embedding.
     memory_size = args.memory_size,
+    self_condition = args.self_condition,
     num_classes = num_classes,
     # if do distillation and featnet_type=='mini', use a miniature of original images as privileged information to train the teacher model.
     # if do distillation and featnet_type=='resnet34' or another model name, 
