@@ -10,7 +10,7 @@ from functools import partial
 import timm
 from einops import rearrange
 from .laplacian import LapLoss
-from .utils import timm_extract_features, print0, exists, exists_add, repeat_interleave, \
+from .utils import timm_extract_features, extract_pre_feat, print0, exists, exists_add, repeat_interleave, \
                    default, normalize_to_neg_one_to_one, unnormalize_to_zero_to_one, unnorm_save_image, \
                    UnlabeledDataset, LabeledDataset, fast_randn, fast_randn_like, dclamp
 import os
@@ -49,17 +49,49 @@ class SinusoidalPosEmb(nn.Module):
         emb = torch.cat((emb.sin(), emb.cos()), dim=-1)
         return emb
 
-def Upsample(dim):
-    return nn.ConvTranspose2d(dim, dim, 4, 2, 1)
+class LearnedSinusoidalPosEmb(nn.Module):
+    """ following @crowsonkb 's lead with learned sinusoidal pos emb """
+    """ https://github.com/crowsonkb/v-diffusion-jax/blob/master/diffusion/models/danbooru_128.py#L8 """
 
-def OutConv(block_klass, dim, out_dim):
+    def __init__(self, dim):
+        super().__init__()
+        assert (dim % 2) == 0
+        half_dim = dim // 2
+        self.weights = nn.Parameter(torch.randn(half_dim))
+
+    def forward(self, x):
+        x = rearrange(x, 'b -> b 1')
+        freqs = x * rearrange(self.weights, 'd -> 1 d') * 2 * math.pi
+        fouriered = torch.cat((freqs.sin(), freqs.cos()), dim = -1)
+        fouriered = torch.cat((x, fouriered), dim = -1)
+        return fouriered
+
+def Upsample(dim, dim_out = None):
     return nn.Sequential(
-            block_klass(dim, dim),
-            nn.Conv2d(dim, out_dim, 1)
-        )    
+        nn.Upsample(scale_factor = 2, mode = 'nearest'),
+        nn.Conv2d(dim, default(dim_out, dim), 3, padding = 1)
+    )
 
-def Downsample(dim):
-    return nn.Conv2d(dim, dim, 4, 2, 1)
+def Downsample(dim, dim_out = None):
+    return nn.Conv2d(dim, default(dim_out, dim), 4, 2, 1)
+
+class OutConv(nn.Module):
+    # dim_in:   dim of input features x
+    # init_dim: dim of residual features from init_conv
+    def __init__(self, block_klass, dim_in, init_dim, out_dim):
+        super().__init__()
+        self.final_res_block = block_klass(dim_in + init_dim, dim_in)
+        self.final_conv = nn.Conv2d(dim_in, out_dim, 1)
+
+    # r: residual features from init_conv
+    def forward(self, x, r):
+        # OutConv may appear in earlier layers of the decoder, in which case x is smaller than r.
+        # So resize r to match x.
+        r = F.interpolate(r, x.shape[2:], mode='bilinear', align_corners=False)
+        x = torch.cat((x, r), dim = 1)
+        x = self.final_res_block(x)
+        x = self.final_conv(x)
+        return x
 
 class LayerNorm(nn.Module):
     def __init__(self, dim, eps = 1e-5):
@@ -88,7 +120,8 @@ class PreNorm(nn.Module):
 class Block(nn.Module):
     def __init__(self, dim, dim_out, kernel_size=3, groups = 8):
         super().__init__()
-        self.proj = nn.Conv2d(dim, dim_out, kernel_size, padding = 1)
+        padding = (kernel_size - 1) // 2
+        self.proj = nn.Conv2d(dim, dim_out, kernel_size, padding = padding)
         self.norm = nn.GroupNorm(groups, dim_out)
         self.act = nn.SiLU()
 
@@ -104,6 +137,7 @@ class Block(nn.Module):
         return x
 
 # Different ResnetBlock's have different mlp (time embedding module).
+# The mlp here transforms the input time embedding again to adapt to this block.
 # No downsampling is done in ResnetBlock.
 class ResnetBlock(nn.Module):
     def __init__(self, dim, dim_out, *, kernel_size=3, time_emb_dim = None, groups = 8):
@@ -111,7 +145,7 @@ class ResnetBlock(nn.Module):
         self.mlp = nn.Sequential(
             nn.SiLU(),      # Sigmoid Linear Unit, aka swish. https://pytorch.org/docs/stable/_images/SiLU.png
             nn.Linear(time_emb_dim, dim_out * 2),
-            # nn.LayerNorm(dim_out * 2)       # Newly added.
+            nn.LayerNorm(dim_out * 2)       # Newly added.
         ) if exists(time_emb_dim) else None
 
         # block1 and block2 are ended with a group norm and a SiLU activation.
@@ -126,7 +160,10 @@ class ResnetBlock(nn.Module):
         scale_shift = None
         if exists(self.mlp) and exists(time_emb):
             time_emb = self.mlp(time_emb)
-            time_emb = rearrange(time_emb, 'b c -> b c 1 1')
+            try:
+                time_emb = rearrange(time_emb, 'b c -> b c 1 1')
+            except:
+                breakpoint()
             scale_shift = time_emb.chunk(2, dim = 1)
 
         h = self.block1(x, scale_shift = scale_shift)
@@ -169,6 +206,8 @@ class LinearAttention(nn.Module):
         k = k.softmax(dim = -1)
 
         q = q * self.scale
+        # v = v / (h * w)
+
         # context: c*c, it's like c centroids, each of c-dim. 
         # q is the weights ("soft membership") of each point belonging to each centroid. 
         # Therefore, it's called "context" instead of "similarity". 
@@ -230,11 +269,12 @@ class Unet(nn.Module):
         out_dim = None,
         dim_mults=(1, 2, 4, 8),
         channels = 3,
-        with_time_emb = True,
         resnet_block_groups = 8,
         memory_size = 1024,
         num_classes = -1,
         learned_variance = False,
+        learned_sinusoidal_cond = False,
+        learned_sinusoidal_dim = 16,        
         featnet_type = 'vit_tiny_patch16_224',
         cls_guide_featnet_type = 'repvgg_b0',
         finetune_tea_feat_ext = False,
@@ -258,22 +298,28 @@ class Unet(nn.Module):
         in_out = list(zip(dims[:-1], dims[1:]))
         num_resolutions = len(in_out)
 
-        block_klass = partial(ResnetBlock, groups = resnet_block_groups)
+        block_klass = partial(ResnetBlock, groups = resnet_block_groups, time_emb_dim = time_dim)
 
         # time embeddings
         # Fixed sinosudal embedding, transformed by two linear layers.
-        if with_time_emb:
-            time_dim = dim * 4              # 256
-            self.time_mlp = nn.Sequential(
-                SinusoidalPosEmb(dim),
-                nn.Linear(dim, time_dim),
-                nn.GELU(),
-                nn.Linear(time_dim, time_dim),
-                nn.LayerNorm(time_dim),        # Newly added
-            )
+        time_dim = dim * 4              # 256
+
+        self.learned_sinusoidal_cond = learned_sinusoidal_cond
+
+        if learned_sinusoidal_cond:
+            sinu_pos_emb = LearnedSinusoidalPosEmb(learned_sinusoidal_dim)
+            fourier_dim = learned_sinusoidal_dim + 1
         else:
-            time_dim = None
-            self.time_mlp = None
+            sinu_pos_emb = SinusoidalPosEmb(dim)
+            fourier_dim = dim
+
+        self.time_mlp = nn.Sequential(
+            sinu_pos_emb,
+            nn.Linear(fourier_dim, time_dim),
+            nn.GELU(),
+            nn.Linear(time_dim, time_dim),
+            nn.LayerNorm(time_dim),        # Newly added
+        )
 
         self.num_classes    = num_classes
         # It's possible that self.num_classes < 0, i.e., the number of classes is not provided.
@@ -292,8 +338,8 @@ class Unet(nn.Module):
             self.cls_embed_ln = None
         # layers
 
-        self.downs = nn.ModuleList([])
-        self.ups = nn.ModuleList([])
+        self.downs  = nn.ModuleList([])
+        self.ups    = nn.ModuleList([])
         # ups_tea: teacher decoder
         self.ups_tea = nn.ModuleList([])
 
@@ -307,21 +353,21 @@ class Unet(nn.Module):
             self.downs.append(nn.ModuleList([
                 # A block_klass is a two-layer conv with residual connection. 
                 # block_klass doesn't downsample features.
-                block_klass(dim_in,  dim_out, time_emb_dim = time_dim),
-                block_klass(dim_out, dim_out, time_emb_dim = time_dim),
+                block_klass(dim_in, dim_in),
+                block_klass(dim_in, dim_in),
                 # att(norm(x)) + x.
                 # Seems adding memory to encoder hurts performance: image features poluted by memory?
-                Residual(PreNorm(dim_out, LinearAttention(dim_out, memory_size=0))),
+                Residual(PreNorm(dim_in, LinearAttention(dim_in, memory_size=0))),
                 # downsampling is done with a 4x4 kernel, stride-2 conv.
-                Downsample(dim_out) if not is_last else nn.Identity()
+                Downsample(dim_in, dim_out) if not is_last else nn.Conv2d(dim_in, dim_out, 3, padding = 1)
             ]))
 
         mid_dim = dims[-1]
-        self.mid_block1 = block_klass(mid_dim, mid_dim, time_emb_dim = time_dim)
+        self.mid_block1 = block_klass(mid_dim, mid_dim)
         # Seems the memory in mid_attn doesn't make much difference.
         self.mid_attn   = Residual(PreNorm(mid_dim, Attention(mid_dim, memory_size=0)))
         # Seems setting kernel size to 1 leads to slightly worse images?
-        self.mid_block2 = block_klass(mid_dim, mid_dim, kernel_size=1, time_emb_dim = time_dim)
+        self.mid_block2 = block_klass(mid_dim, mid_dim, kernel_size=1)
 
         self.featnet_type      = featnet_type
         self.finetune_tea_feat_ext      = finetune_tea_feat_ext
@@ -355,71 +401,52 @@ class Unet(nn.Module):
         
         # distillation_type: 'none' or 'tfrac'. 
         if self.distillation_type == 'none':
-            extra_up_dim = 0
+            extra_up_dim0 = 0
         # tfrac: teacher sees less-noisy images (either sees a miniature or through a feature network)
         else:
             if self.featnet_type == 'mini':
-                extra_up_dim = 3
+                extra_up_dim0 = 3
             else:
                 # number of output features from the image feature extractor.
-                extra_up_dim = self.featnet_dim
+                # Both student and teacher have these extra features. 
+                # But the features for student are extracted from the original noise images.
+                # And the features for teacher are extracted from less noisy images.
+                extra_up_dim0 = self.featnet_dim
         
-        extra_up_dims = [ extra_up_dim ] + [0] * (num_resolutions - 1)
         default_out_dim = channels * (1 if not learned_variance else 2)
         self.out_dim = default(out_dim, default_out_dim)
                         
         for ind, (dim_in, dim_out) in enumerate(reversed(in_out)):
             is_last = ind == (len(in_out) - 1)
+            extra_up_dim = extra_up_dim0 if ind == 0 else 0
 
             self.ups.append(nn.ModuleList([
-                block_klass(dim_out * 2 + extra_up_dims[ind], dim_in, time_emb_dim = time_dim),
-                block_klass(dim_in, dim_in, time_emb_dim = time_dim),
-                Residual(PreNorm(dim_in, LinearAttention(dim_in, memory_size=memory_size))),
-                Upsample(dim_in) if not is_last else nn.Identity(),
-                OutConv(block_klass, dim_in, self.out_dim)
+                block_klass(dim_out + dim_in + extra_up_dim, dim_out),
+                block_klass(dim_out + dim_in, dim_out),
+                Residual(PreNorm(dim_out, LinearAttention(dim_out, memory_size=memory_size))),
+                Upsample(dim_out, dim_in) if not is_last else nn.Conv2d(dim_out, dim_in, 3, padding = 1),
+                # Each block has an OutConv layer, to output multiscale denoised images.
+                OutConv(block_klass, dim_in, init_dim, self.out_dim)
             ]))
-
+    
         # Sharing ups seems to perform worse.
         self.tea_share_ups = False
         if self.tea_share_ups:
             self.ups_tea = self.ups
         else:
-            for ind, (dim_in, dim_out) in enumerate(reversed(in_out[1:])):
-                is_last = ind >= (num_resolutions - 1)
+            for ind, (dim_in, dim_out) in enumerate(reversed(in_out)):
+                is_last = ind == (len(in_out) - 1)
+                extra_up_dim = extra_up_dim0 if ind == 0 else 0
                 # miniature image / image features as teacher's priviliged information.
 
                 self.ups_tea.append(nn.ModuleList([
-                    block_klass(dim_out * 2 + extra_up_dims[ind], dim_in, time_emb_dim = time_dim),
-                    block_klass(dim_in, dim_in, time_emb_dim = time_dim),
+                    block_klass(dim_out * 2 + extra_up_dim, dim_in),
+                    block_klass(dim_in, dim_in),
                     Residual(PreNorm(dim_in, LinearAttention(dim_in, memory_size=memory_size))),
-                    Upsample(dim_in) if not is_last else nn.Identity(),
-                    OutConv(block_klass, dim_in, self.out_dim)
+                    Upsample(dim_in) if not is_last else nn.Conv2d(dim_out, dim_in, 3, padding = 1),
+                    # Each block has an OutConv layer, to output multiscale denoised images.
+                    OutConv(block_klass, dim_in, init_dim, self.out_dim)
                 ]))
-
-    # extract_pre_feat(): extract features using a pretrained model.
-    # use_head_feat: use the features that feat_extractor uses to do the final classification. 
-    # It's not relevant to class embeddings used in as part of Unet features.
-    def extract_pre_feat(self, feat_extractor, img, ref_shape, has_grad=True, use_head_feat=False):
-        if self.featnet_type == 'none':
-            return None
-
-        if self.featnet_type == 'mini':
-            # A miniature image as teacher's priviliged information. 
-            # 128x128 images will be resized to 16x16 below.
-            distill_feat = img
-        else:
-            if has_grad:
-                distill_feat = timm_extract_features(feat_extractor, img, use_head_feat)
-            else:
-                # Wrap the feature extraction with no_grad() to save RAM.
-                with torch.no_grad():
-                    distill_feat = timm_extract_features(feat_extractor, img, use_head_feat)                
-
-        if exists(ref_shape):
-            # For 128x128 images, vit features are 4x4. Resize to 16x16.
-            distill_feat = F.interpolate(distill_feat, size=ref_shape, mode='bilinear', align_corners=False)
-        # Otherwise, do not resize distill_feat.
-        return distill_feat
 
     def pre_update(self):
         if not self.cls_guide_shares_tea_feat_ext:
@@ -441,13 +468,9 @@ class Unet(nn.Module):
     def forward(self, x, time, classes_or_embed=None, img_tea=None):
         init_noise = x
         x = self.init_conv(x)
+        r = x.clone() 
         # t: time embedding.
-        if exists(self.time_mlp):
-            t = self.time_mlp(time.flatten())
-            # t: [batch, 1, 1, time_dim=256].
-            t = t.view(time.shape[0], *((1,) * (len(x.shape) - 2)), -1)
-        else:
-            t = None
+        t = self.time_mlp(time.flatten())
 
         if self.cls_embed_type != 'none':
             if exists(classes_or_embed):
@@ -460,10 +483,12 @@ class Unet(nn.Module):
 
             cls_embed = self.cls_embed_ln(cls_embed)
             # cls_embed: [batch, 1, 1, time_dim=256].
-            cls_embed = cls_embed.view(cls_embed.shape[0], *((1,) * (len(x.shape) - 2)), -1)
+            # cls_embed = cls_embed.view(cls_embed.shape[0], *((1,) * (len(x.shape) - 2)), -1)
             # The teacher always sees the class embedding.
             t_tea = exists_add(t, cls_embed)
             # 'tea_stu': Both the student and teacher see the class embedding.
+            # Otherwise, only the teacher sees the class embedding. 
+            # But in actual use, we disable these alternative configurations (only 'tea_stu' or 'none').
             t_stu = t_tea if self.cls_embed_type == 'tea_stu' else t
         else:
             t_stu = t_tea = t
@@ -471,6 +496,7 @@ class Unet(nn.Module):
         h = []
 
         for block1, block2, attn, downsample in self.downs:
+            # the encoder only sees the time embedding, not the class embedding.
             x = block1(x, t)
             x = block2(x, t)
             x = attn(x)
@@ -492,9 +518,9 @@ class Unet(nn.Module):
 
         if self.distillation_type == 'tfrac':
         # Always fine-tune the student feature extractor.
-            noise_feat = self.extract_pre_feat(self.dist_feat_ext_stu, init_noise, 
-                                               mid_feat.shape[2:], 
-                                               has_grad=True, use_head_feat=False)
+            noise_feat = extract_pre_feat(self.featnet_type, self.dist_feat_ext_stu, init_noise, 
+                                          mid_feat.shape[2:], 
+                                          has_grad=True, use_head_feat=False)
         else:
             noise_feat = None
 
@@ -505,6 +531,7 @@ class Unet(nn.Module):
             else:
                 x = torch.cat((x, h[-ind-1]), dim=1)
 
+            # The decoder sees the sum of the time embedding and class embedding.
             x = block1(x, t_stu)
             x = block2(x, t_stu)
             x = attn(x)
@@ -514,15 +541,15 @@ class Unet(nn.Module):
             # upsample() doesn't change the number of channels. 
             # The channel numbers are doubled by block1().
             x = upsample(x)
-            pred_stu = out_conv(x)
+            pred_stu = out_conv(x, r)
             preds_stu.append(pred_stu)
 
         # img_tea is provided. Do distillation.
         if self.distillation_type == 'tfrac' and exists(img_tea):
             # finetune_tea_feat_ext controls whether to fine-tune the teacher feature extractor.
-            tea_feat = self.extract_pre_feat(self.dist_feat_ext_tea, img_tea, 
-                                             mid_feat.shape[2:], 
-                                             has_grad=self.finetune_tea_feat_ext, use_head_feat=False)
+            tea_feat = extract_pre_feat(self.featnet_type, self.dist_feat_ext_tea, img_tea, 
+                                        mid_feat.shape[2:], 
+                                        has_grad=self.finetune_tea_feat_ext, use_head_feat=False)
         else:
             tea_feat = None
 
@@ -544,7 +571,7 @@ class Unet(nn.Module):
                 # upsample() doesn't change the number of channels. 
                 # The channel numbers are doubled by block1().                
                 x = upsample(x)
-                pred_tea = out_conv(x)
+                pred_tea = out_conv(x, r)
                 preds_tea.append(pred_tea)
 
         else:
@@ -885,8 +912,8 @@ class GaussianDiffusion(nn.Module):
             img_orig        = torch.cat([img_orig1, img_orig2], dim=0)
             classes         = classes1.repeat(2)
 
-        feat_gt = self.denoise_fn.extract_pre_feat(self.denoise_fn.cls_guide_feat_ext, img_gt, ref_shape=None, 
-                                                   has_grad=False, use_head_feat=self.cls_guide_use_head_feat)        
+        feat_gt = extract_pre_feat(self.featnet_type, self.denoise_fn.cls_guide_feat_ext, img_gt, ref_shape=None, 
+                                   has_grad=False, use_head_feat=self.cls_guide_use_head_feat)        
         feat_gt1, feat_gt2  = feat_gt[:b2], feat_gt[b2:]
         w = torch.rand((b2, ), device=img_gt.device)
         # Normalize w into [min_interp_w, 1-min_interp_w], i.e., [0.2, 0.8].
@@ -925,7 +952,7 @@ class GaussianDiffusion(nn.Module):
             cls_embed_interp = self.denoise_fn.cls_embedding(classes1)
         else:
             cls_embed = self.denoise_fn.cls_embedding(classes)
-            cls_embed = cls_embed.view(b, *((1,) * (len(img_gt.shape) - 2)), -1)
+            # cls_embed = cls_embed.view(b, *((1,) * (len(img_gt.shape) - 2)), -1)
             cls_embed1, cls_embed2 = cls_embed[:b2], cls_embed[b2:]
             cls_embed_interp = w * cls_embed1 + (1 - w) * cls_embed2
 
@@ -958,8 +985,8 @@ class GaussianDiffusion(nn.Module):
                 unnorm_save_image(img_stu_pred, img_pred_save_path, nrow = 8)
                 #print("Predicted images are saved to", img_pred_save_path)
 
-        feat_interp = self.denoise_fn.extract_pre_feat(self.denoise_fn.cls_guide_feat_ext, img_stu_pred, ref_shape=None, 
-                                                       has_grad=True, use_head_feat=self.cls_guide_use_head_feat)
+        feat_interp = extract_pre_feat(self.featnet_type, self.denoise_fn.cls_guide_feat_ext, img_stu_pred, ref_shape=None, 
+                                       has_grad=True, use_head_feat=self.cls_guide_use_head_feat)
 
         loss_interp1 = self.consist_loss_fn(feat_interp, feat_gt1, reduction='none')
         loss_interp2 = self.consist_loss_fn(feat_interp, feat_gt2, reduction='none')
@@ -993,9 +1020,9 @@ class GaussianDiffusion(nn.Module):
         img_gt2 = img_gt[:b2]
         classes2 = classes[:b2]
 
-        feat_gt = self.denoise_fn.extract_pre_feat(self.denoise_fn.cls_guide_feat_ext, img_gt2, ref_shape=None, 
-                                                   has_grad=False, use_head_feat=self.cls_guide_use_head_feat)        
-        noise = fast_randn_like(img_gt2)
+        feat_gt = extract_pre_feat(self.featnet_type, self.denoise_fn.cls_guide_feat_ext, img_gt2, ref_shape=None, 
+                                   has_grad=False, use_head_feat=self.cls_guide_use_head_feat)        
+        noise   = fast_randn_like(img_gt2)
 
         if noise_scheme == 'pure_noise':
             t = torch.full((b2, ), self.num_timesteps - 1, device=device, dtype=torch.long)
@@ -1017,7 +1044,7 @@ class GaussianDiffusion(nn.Module):
             img_noisy       = x_start_weight * img_gt2 + noise_weight * noise
 
         cls_embed = self.denoise_fn.cls_embedding(classes2)
-        cls_embed = cls_embed.view(b2, *((1,) * (len(img_noisy.shape) - 2)), -1)
+        # cls_embed = cls_embed.view(b2, *((1,) * (len(img_noisy.shape) - 2)), -1)
 
         # Set img_tea to None, so that teacher module won't be executed and trained, 
         # to reduce unnecessary compute.
@@ -1051,8 +1078,8 @@ class GaussianDiffusion(nn.Module):
                 unnorm_save_image(img_stu_pred, img_pred_save_path, nrow = 8)
                 #print("Predicted images are saved to", img_pred_save_path)
 
-        feat_stu = self.denoise_fn.extract_pre_feat(self.denoise_fn.cls_guide_feat_ext, img_stu_pred, ref_shape=None, 
-                                                     has_grad=True, use_head_feat=self.cls_guide_use_head_feat)
+        feat_stu = extract_pre_feat(self.featnet_type, self.denoise_fn.cls_guide_feat_ext, img_stu_pred, ref_shape=None, 
+                                    has_grad=True, use_head_feat=self.cls_guide_use_head_feat)
 
         loss_cls_guide = self.consist_loss_fn(feat_stu, feat_gt)
         return loss_cls_guide

@@ -419,6 +419,30 @@ def timm_extract_features(model, x, use_head_feat=False):
         x = x[:, 1:].permute(0, 2, 1).reshape(x.shape[0], -1, *out_size)
     return x
 
+# extract_pre_feat(): extract features using a pretrained model.
+# use_head_feat: use the features that feat_extractor uses to do the final classification. 
+# It's not relevant to class embeddings used in as part of Unet features.
+def extract_pre_feat(featnet_type, feat_extractor, img, ref_shape, has_grad=True, use_head_feat=False):
+    if featnet_type == 'none':
+        return None
+
+    if featnet_type == 'mini':
+        # A miniature image as teacher's priviliged information. 
+        # 128x128 images will be resized to 16x16 below.
+        distill_feat = img
+    else:
+        if has_grad:
+            distill_feat = timm_extract_features(feat_extractor, img, use_head_feat)
+        else:
+            # Wrap the feature extraction with no_grad() to save RAM.
+            with torch.no_grad():
+                distill_feat = timm_extract_features(feat_extractor, img, use_head_feat)                
+
+    if exists(ref_shape):
+        # For 128x128 images, vit features are 4x4. Resize to 16x16.
+        distill_feat = F.interpolate(distill_feat, size=ref_shape, mode='bilinear', align_corners=False)
+    # Otherwise, do not resize distill_feat.
+    return distill_feat
 
 # Dual teaching doesn't work.
 def dual_teaching_loss(img_gt, img_stu, img_tea):
