@@ -5,7 +5,7 @@ from inspect import isfunction
 from torch import nn, einsum
 from einops import rearrange
 
-from .denoising_diffusion_pytorch import GaussianDiffusion, extract, unnormalize_to_zero_to_one
+from .denoising_diffusion_pytorch import GaussianDiffusion, extract_tensor, unnormalize_to_zero_to_one
 
 # constants
 
@@ -97,8 +97,8 @@ class LearnedGaussianDiffusion(GaussianDiffusion):
         model_output = default(model_output, lambda: self.model(x, t))
         pred_noise, var_interp_frac_unnormalized = model_output.chunk(2, dim = 1)
 
-        min_log = extract(self.posterior_log_variance_clipped, t, x.shape)
-        max_log = extract(torch.log(self.betas), t, x.shape)
+        min_log = extract_tensor(self.posterior_log_variance_clipped, t, x.shape)
+        max_log = extract_tensor(torch.log(self.betas), t, x.shape)
         var_interp_frac = unnormalize_to_zero_to_one(var_interp_frac_unnormalized)
 
         model_log_variance = var_interp_frac * max_log + (1 - var_interp_frac) * min_log
