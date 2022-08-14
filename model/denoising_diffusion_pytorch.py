@@ -84,12 +84,13 @@ class OutConv(nn.Module):
         self.final_conv = nn.Conv2d(dim_in, out_dim, 1)
 
     # r: residual features from init_conv
-    def forward(self, x, r):
+    # t: time embedding.
+    def forward(self, x, r, t):
         # OutConv may appear in earlier layers of the decoder, in which case x is smaller than r.
         # So resize r to match x.
         r = F.interpolate(r, x.shape[2:], mode='bilinear', align_corners=False)
         x = torch.cat((x, r), dim = 1)
-        x = self.final_res_block(x)
+        x = self.final_res_block(x, t)
         x = self.final_conv(x)
         return x
 
@@ -543,7 +544,7 @@ class Unet(nn.Module):
             # upsample() doesn't change the number of channels. 
             # The channel numbers are doubled by block1().
             x = upsample(x)
-            pred_stu = out_conv(x, r)
+            pred_stu = out_conv(x, r, t_stu)
             preds_stu.append(pred_stu)
 
         # img_tea is provided. Do distillation.
@@ -574,7 +575,7 @@ class Unet(nn.Module):
                 # upsample() doesn't change the number of channels. 
                 # The channel numbers are doubled by block1().                
                 x = upsample(x)
-                pred_tea = out_conv(x, r)
+                pred_tea = out_conv(x, r, t_tea)
                 preds_tea.append(pred_tea)
 
         else:
