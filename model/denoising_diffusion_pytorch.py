@@ -1037,7 +1037,6 @@ class GaussianDiffusion(nn.Module):
             cls_embed = self.denoise_fn.cls_embedding(classes)
             # cls_embed = cls_embed.view(b, *((1,) * (len(img_gt.shape) - 2)), -1)
             cls_embed1, cls_embed2 = cls_embed[:b2], cls_embed[b2:]
-            breakpoint()
             cls_embed_interp = w_2d * cls_embed1 + (1 - w_2d) * cls_embed2
 
         # Setting the last param (img_tea) to None, so that teacher module won't be executed, 
