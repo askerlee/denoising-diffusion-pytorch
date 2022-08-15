@@ -999,8 +999,8 @@ class GaussianDiffusion(nn.Module):
         w = torch.rand((b2, ), device=img_gt.device)
         # Normalize w into [min_interp_w, 1-min_interp_w], i.e., [0.2, 0.8].
         w = (1 - 2 * min_interp_w) * w + min_interp_w
-        # w.shape: (b2, 1, 1, 1)
-        # w = w.view(b2, *((1,) * (len(img_gt.shape) - 1)))
+        # w_4d.shape: (b2, 1, 1, 1)
+        w_4d = w.view(b2, *((1,) * (len(img_gt.shape) - 1)))
 
         noise = fast_randn_like(img_gt)
         if noise_scheme == 'pure_noise':
@@ -1013,7 +1013,7 @@ class GaussianDiffusion(nn.Module):
             t  = t2.repeat(2)
             img_noisy = self.q_sample(x_start=img_gt, t=t, noise=noise, distill_t_frac=-1)
             img_noisy1, img_noisy2 = img_noisy[:b2], img_noisy[b2:]
-            img_noisy_interp = w * img_noisy1 + (1 - w) * img_noisy2
+            img_noisy_interp = w_4d * img_noisy1 + (1 - w_4d) * img_noisy2
 
         elif noise_scheme == 'almost_pure_noise':
             t2 = torch.full((b2, ), self.num_timesteps - 2, device=device, dtype=torch.long)
@@ -1025,7 +1025,7 @@ class GaussianDiffusion(nn.Module):
             noise_weight    = torch.sqrt(1 - alphas_cumprod)
             img_noisy       = x_start_weight * img_gt + noise_weight * noise
             img_noisy1, img_noisy2 = img_noisy[:b2], img_noisy[b2:]
-            img_noisy_interp = w * img_noisy1 + (1 - w) * img_noisy2
+            img_noisy_interp = w_4d * img_noisy1 + (1 - w_4d) * img_noisy2
 
         # Embeddings of the first and second halves are the same. 
         # No need to do interpolation on class embedding.
@@ -1075,16 +1075,16 @@ class GaussianDiffusion(nn.Module):
             # if neighbor_mask[i, pos] = 1, i.e., this pixel's feature is more similar to sub-batch1, 
             # then use loss weight w. Otherwise, it's more similar to sub-batch2, use loss weight 1-w.
             neighbor_mask = (loss_interp1 < loss_interp2).float()
-            loss_weight = neighbor_mask * w + (1 - neighbor_mask) * (1 - w)
+            loss_weight = neighbor_mask * w_4d + (1 - neighbor_mask) * (1 - w_4d)
             # The more similar features from tea_feat of either sub-batch1 or sub-batch2 are selected 
             # to compute the loss with feat_interp at each pixel.
             loss_interp = torch.minimum(loss_interp1, loss_interp2) * loss_weight
             loss_interp = loss_interp.mean()
         else:
-            loss_interp1_weighted = loss_interp1 * w
-            loss_interp2_weighted = loss_interp2 * (1 - w)
+            loss_interp1_weighted = loss_interp1 * w_4d
+            loss_interp2_weighted = loss_interp2 * (1 - w_4d)
             neighbor_mask = (loss_interp1_weighted < loss_interp2_weighted).float()
-            sel_weight = neighbor_mask * w + (1 - neighbor_mask) * (1 - w)
+            sel_weight = neighbor_mask * w_4d + (1 - neighbor_mask) * (1 - w_4d)
             total_weight = sel_weight.sum() + 1e-6
             loss_interp = torch.minimum(loss_interp1_weighted, loss_interp2_weighted)
             loss_interp = loss_interp.sum() / total_weight
