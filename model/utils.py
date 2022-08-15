@@ -548,7 +548,10 @@ def normalize_to_neg_one_to_one(img):
 def unnormalize_to_zero_to_one(t):
     return (t + 1) * 0.5
 
-def unnorm_save_image(img, img_save_path, nrow):
+def unnorm_save_image(img, img_save_path, nrow, clip_denoised=True):
+    if clip_denoised:
+        img = dclamp(img, -1., 1.)
+        
     img = unnormalize_to_zero_to_one(img)
     utils.save_image(img, img_save_path, nrow=nrow)
 
