@@ -37,7 +37,7 @@ class Trainer(object):
         save_and_sample_every = 1000,
         sample_dir = 'samples',
         cp_dir = 'checkpoints',
-        num_workers = 5,
+        num_workers = 3,
         debug = False,
     ):
         super().__init__()
@@ -421,6 +421,7 @@ trainer = Trainer(
     sample_dir  = args.sample_dir,
     cp_dir      = args.cp_dir,
     save_and_sample_every = args.save_sample_interval,
+    num_workers=args.num_workers,
 )
 
 trainer.train()
