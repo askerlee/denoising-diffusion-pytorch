@@ -135,14 +135,14 @@ class BaseDataset(data.Dataset):
         ])
 
         if self.do_color_aug:
-            self.tv_transform = self.test_transform     # No color jitter.
-        else:
             self.tv_transform = transforms.Compose([
                 ToPILImage(),
                 Resize((image_size, image_size)),
                 ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.5/3.14),
                 ToTensor()
             ])
+        else:
+            self.tv_transform = self.test_transform     # No color jitter.
 
     def __len__(self):
         return len(self.paths)
