@@ -1001,6 +1001,8 @@ class GaussianDiffusion(nn.Module):
         w = (1 - 2 * min_interp_w) * w + min_interp_w
         # w_4d.shape: (b2, 1, 1, 1)
         w_4d = w.view(b2, *((1,) * (len(img_gt.shape) - 1)))
+        # w_2d.shape: (b2, 1)
+        w_2d = w.view(b2, 1)
 
         noise = fast_randn_like(img_gt)
         if noise_scheme == 'pure_noise':
@@ -1035,7 +1037,8 @@ class GaussianDiffusion(nn.Module):
             cls_embed = self.denoise_fn.cls_embedding(classes)
             # cls_embed = cls_embed.view(b, *((1,) * (len(img_gt.shape) - 2)), -1)
             cls_embed1, cls_embed2 = cls_embed[:b2], cls_embed[b2:]
-            cls_embed_interp = w * cls_embed1 + (1 - w) * cls_embed2
+            breakpoint()
+            cls_embed_interp = w_2d * cls_embed1 + (1 - w_2d) * cls_embed2
 
         # Setting the last param (img_tea) to None, so that teacher module won't be executed, 
         # to reduce unnecessary compute.
