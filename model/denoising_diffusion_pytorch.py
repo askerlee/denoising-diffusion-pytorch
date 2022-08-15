@@ -12,7 +12,7 @@ from einops import rearrange
 from .laplacian import LapLoss
 from .utils import timm_extract_features, extract_pre_feat, print0, exists, exists_add, repeat_interleave, \
                    default, normalize_to_neg_one_to_one, unnormalize_to_zero_to_one, unnorm_save_image, \
-                   UnlabeledDataset, LabeledDataset, fast_randn, fast_randn_like, dclamp, l2norm
+                   UnlabeledDataset, LabeledDataset, fast_randn, fast_randn_like, dclamp, l2norm, fetch_attr 
 import os
 import copy
 from tqdm.auto import tqdm
@@ -288,7 +288,6 @@ class Unet(nn.Module):
         finetune_tea_feat_ext = False,
         cls_guide_shares_tea_feat_ext = False,
         distillation_type = 'none',
-        cls_embed_type = 'none',
     ):
         super().__init__()
 
@@ -337,7 +336,7 @@ class Unet(nn.Module):
         if self.num_classes <= 0:
             self.cls_embed_type = 'none'
         else:
-            self.cls_embed_type = cls_embed_type
+            self.cls_embed_type = 'tea_stu'
 
         if self.cls_embed_type != 'none':
             self.cls_embedding = nn.Embedding(self.num_classes, time_dim)
@@ -653,8 +652,6 @@ class GaussianDiffusion(nn.Module):
         featnet_type = 'none',
         distillation_type = 'none',
         distill_t_frac = 0.,
-        cls_embed_type = 'none',
-        num_classes = -1,
         dataset = None,
         cls_guide_use_head_feat = False,
         cls_guide_type = 'none',
@@ -669,19 +666,10 @@ class GaussianDiffusion(nn.Module):
         self.local_rank = int(os.environ.get('LOCAL_RANK', 0))
         self.is_master = (self.local_rank <= 0)
 
-        if isinstance(denoise_fn, torch.nn.DataParallel):
-            denoise_fn_channels = denoise_fn.module.channels
-            denoise_fn_out_dim  = denoise_fn.module.out_dim
-            denoise_fn_self_condition = denoise_fn.module.self_condition
-        else:
-            denoise_fn_channels = denoise_fn.channels
-            denoise_fn_out_dim  = denoise_fn.out_dim
-            denoise_fn_self_condition = denoise_fn.self_condition
+        self.num_classes    = fetch_attr(denoise_fn, 'num_classes')
+        self.channels       = fetch_attr(denoise_fn, 'channels')
+        self.self_condition = fetch_attr(denoise_fn, 'self_condition')
 
-        assert not (type(self) == GaussianDiffusion and denoise_fn_channels != denoise_fn_out_dim)
-
-        self.channels           = denoise_fn_channels
-        self.self_condition     = denoise_fn_self_condition
         self.image_size         = image_size
         self.denoise_fn         = denoise_fn    # Unet
         self.objective          = objective
@@ -691,13 +679,13 @@ class GaussianDiffusion(nn.Module):
         self.featnet_type       = featnet_type
         self.distillation_type  = distillation_type
         self.distill_t_frac     = distill_t_frac if (self.distillation_type == 'tfrac') else -1
-        self.cls_embed_type     = cls_embed_type
-        self.num_classes        = num_classes
         self.dataset            = dataset
         # It's possible that self.num_classes < 0, i.e., the number of classes is not provided.
         # In this case, we set cls_embed_type to 'none'.
         if self.num_classes <= 0:
             self.cls_embed_type = 'none'
+        else:
+            self.cls_embed_type = 'tea_stu'
 
         # interpolation loss reduces performance.
         self.interp_loss_weight     = 0
@@ -1020,7 +1008,7 @@ class GaussianDiffusion(nn.Module):
             img_noisy_interp = noise[:b2]
 
         elif noise_scheme == 'larger_t':
-            # Only use the largest 1/4 of possible t values to inject noises.
+            # Only use the largest 1/5 of possible t values to inject noises.
             t2 = torch.randint(int(self.num_timesteps * min_t_percentile), self.num_timesteps, (b2, ), device=device).long()
             t  = t2.repeat(2)
             img_noisy = self.q_sample(x_start=img_gt, t=t, noise=noise, distill_t_frac=-1)
@@ -1121,7 +1109,7 @@ class GaussianDiffusion(nn.Module):
             img_noisy = noise
 
         elif noise_scheme == 'larger_t':
-            # Only use the largest 1/10 of possible t values to inject noises.
+            # Only use the largest 1/5 of possible t values to inject noises.
             t = torch.randint(int(self.num_timesteps * min_t_percentile), self.num_timesteps, (b2, ), device=device).long()
             img_noisy = self.q_sample(x_start=img_gt2, t=t, noise=noise, distill_t_frac=-1)
 
@@ -1238,7 +1226,9 @@ class GaussianDiffusion(nn.Module):
         else:
             raise ValueError(f'invalid loss type {self.loss_type}')
 
-    def loss_fn_adaptscale(self, pred, target):
+    # For multi-scale training. The pred images from a middle block is smaller 
+    # than the ground truth images. Therefore manually upsample the pred images.
+    def loss_fn_alignsize(self, pred, target):
         if target.shape != pred.shape:
             target = F.interpolate(target, pred.shape[2:], mode='bilinear', align_corners=False)
         return self.loss_fn(pred, target)
@@ -1310,10 +1300,10 @@ class GaussianDiffusion(nn.Module):
             else:
                 raise ValueError(f'unknown objective {self.objective}')
 
-            loss_stu = loss_stu + self.loss_fn_adaptscale(pred_stu, target)
-            if self.distillation_type != 'none':
+            loss_stu = loss_stu + self.loss_fn_alignsize(pred_stu, target)
+            if self.distillation_type != 'none' and exists(preds_tea):
                 pred_tea    = preds_tea[i]
-                loss_tea    = loss_tea + self.loss_fn_adaptscale(pred_tea, target)
+                loss_tea    = loss_tea + self.loss_fn_alignsize(pred_tea, target)
                 loss_align_tea_stu = loss_align_tea_stu + F.l1_loss(noise_feat, tea_feat.detach())
 
         loss_stu, loss_tea, loss_align_tea_stu = loss_stu / len(preds_stu), \

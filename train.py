@@ -231,7 +231,7 @@ parser.add_argument('--times', dest='num_timesteps', type=int, default=1000,
 parser.add_argument('--mem', dest='memory_size', type=int, default=2048, 
                     help="Number of memory cells in each attention layer")
 parser.add_argument('--sched', dest='alpha_beta_schedule', type=str, choices=['cosb', 'lina', 'linb'], 
-                    default='linb', help="Type of alpha/beta schedule")
+                    default='lina', help="Type of alpha/beta schedule")
 
 parser.add_argument('--losstype', dest='loss_type', type=str, choices=['l1', 'l2', 'lap'], default='l1', 
                     help="Type of image denoising loss")
@@ -258,8 +258,6 @@ parser.add_argument('--tuneteacher', dest='finetune_tea_feat_ext', default=False
 parser.add_argument('--alignfeat', dest='align_tea_stu_feat_weight', default=0.001, type=float, 
                     help='Align the features of the feature extractors of the teacher and the student. '
                     'Default: 0.0, meaning no alignment.')
-parser.add_argument('--clsembed', dest='cls_embed_type', choices=['none', 'tea_stu'], default='tea_stu', 
-                    help='How class embedding is incorporated in the student and teacher')
 parser.add_argument('--clsguidefeatnet', dest='cls_guide_featnet_type', 
                     choices=[ 'none', 'resnet34', 'resnet18', 'repvgg_b0', 
                               'mobilenetv2_120d', 'vit_base_patch8_224', 'vit_tiny_patch16_224' ], 
@@ -360,7 +358,6 @@ unet = Unet(
     # if finetune_tea_feat_ext=False,
     # do not finetune the pretrained image feature extractor of the teacher model.
     finetune_tea_feat_ext = args.finetune_tea_feat_ext,
-    cls_embed_type = args.cls_embed_type,
 )
 
 diffusion = GaussianDiffusion(
@@ -377,8 +374,6 @@ diffusion = GaussianDiffusion(
     featnet_type = args.featnet_type,
     distillation_type = args.distillation_type,
     distill_t_frac = args.distill_t_frac,
-    cls_embed_type = args.cls_embed_type,
-    num_classes = num_classes,
     dataset = dataset,
     cls_guide_use_head_feat = args.cls_guide_use_head_feat,
     cls_guide_type = args.cls_guide_type,

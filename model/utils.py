@@ -43,6 +43,12 @@ def exists_add(x, a):
     else:
         return a
 
+def fetch_attr(model, attr_name):
+    if isinstance(model, torch.nn.DataParallel):
+        return model.module.__dict__[attr_name]
+    else:
+        return model.__dict__[attr_name]
+
 def reduce_tensor(tensor, world_size):
     rt = tensor.clone()
     dist.all_reduce(rt, op=dist.ReduceOp.SUM)
@@ -603,3 +609,4 @@ class ConditionalInstanceNorm2d(nn.Module):
         gamma, beta = self.embed(style_index).chunk(2, 1)
         out = gamma.view(-1, self.num_features, 1, 1) * out + beta.view(-1, self.num_features, 1, 1)
         return out    
+
