@@ -211,7 +211,9 @@ parser.add_argument('--clip', dest='grad_clip', type=float, default=-1, help="Gr
 parser.add_argument('--cp', type=str, dest='cp_path', default=None, help="The path of a model checkpoint")
 parser.add_argument('--sample', dest='sample_only', action='store_true', help='Do sampling using a trained model')
 parser.add_argument('--nogeoaug', dest='do_geo_aug', action='store_false', 
-                    help='Do not do geometric augmentation to training images')
+                    help='Do not do geometric augmentation on training images')
+parser.add_argument('--nocoloraug', dest='do_color_aug', action='store_false', 
+                    help='Do not do color augmentation on training images')                    
 parser.add_argument('--workers', dest='num_workers', type=int, default=3, 
                     help="Number of workers for data loading. On machines with slower disk IO, this should be higher.")
 parser.add_argument('--debug', action='store_true', help='Debug the diffusion process')
@@ -325,7 +327,8 @@ torch.cuda.manual_seed_all(args.seed)
 torch.backends.cudnn.benchmark = True
 
 if args.ds == 'imagenet':
-    dataset = Imagenet(args.ds, image_size=128, split='train', do_geo_aug=args.do_geo_aug)
+    dataset = Imagenet(args.ds, image_size=128, split='train', 
+                       do_geo_aug=args.do_geo_aug, do_color_aug=args.do_color_aug)
     save_sample_images = False
     if save_sample_images:
         dataset.training = False
@@ -333,12 +336,12 @@ if args.ds == 'imagenet':
         exit(0)
 elif args.ds == '102flowers':
     dataset = TxtLabeledDataset(args.ds, label_file='102flowers/102flower_labels.txt', 
-                             image_size=128, do_geo_aug=args.do_geo_aug)
+                             image_size=128, do_geo_aug=args.do_geo_aug, do_color_aug=False)
 elif args.on_multi_domain:
     dataset = ClsByFolderDataset(args.ds, image_size=128, do_geo_aug=args.do_geo_aug, do_color_aug=False)
     args.cls_guide_type = 'single'
 else:
-    dataset = SingletonDataset(args.ds, image_size=128, do_geo_aug=args.do_geo_aug)
+    dataset = SingletonDataset(args.ds, image_size=128, do_geo_aug=args.do_geo_aug, do_color_aug=args.do_color_aug)
 
 num_classes = dataset.get_num_classes()
 
