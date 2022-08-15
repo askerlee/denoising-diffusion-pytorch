@@ -1,10 +1,9 @@
-from model import Unet, GaussianDiffusion, UnlabeledDataset, LabeledDataset, Imagenet, \
+from model import Unet, GaussianDiffusion, \
+                  SingletonDataset, TxtLabeledDataset, Imagenet, ClsByFolderDataset, \
                   EMA, cycle, DistributedDataParallelPassthrough, \
                   sample_images, AverageMeters, print0, reduce_tensor
 import argparse
 import torch
-import torch.nn as nn
-import torch.optim as optim
 from torch.cuda.amp import autocast, GradScaler
 from torch.optim import Adam
 from torch.utils.data.distributed import DistributedSampler
@@ -12,7 +11,6 @@ from torch.utils import data
 import os
 import copy
 from tqdm.auto import tqdm
-from pathlib import Path
 import random
 import numpy as np
 import re
@@ -221,6 +219,7 @@ parser.add_argument('--debug', action='store_true', help='Debug the diffusion pr
 parser.add_argument('--gpus', type=int, nargs='+', default=[0, 1])
 parser.add_argument('--noamp', dest='amp', default=True, action='store_false', help='Do not use mixed precision')
 parser.add_argument('--ds', type=str, default='imagenet', help="The path of training dataset")
+parser.add_argument('--multidom', dest='on_multi_domain', action='store_true', help='Train on multiple domains')
 parser.add_argument('--saveimg', dest='sample_dir', type=str, default='samples', 
                     help="The path to save sampled images")
 parser.add_argument('--savecp',  dest='cp_dir', type=str, default='checkpoints', 
@@ -233,7 +232,7 @@ parser.add_argument('--mem', dest='memory_size', type=int, default=2048,
 parser.add_argument('--sched', dest='alpha_beta_schedule', type=str, choices=['cosb', 'lina', 'linb'], 
                     default='lina', help="Type of alpha/beta schedule")
 
-parser.add_argument('--losstype', dest='loss_type', type=str, choices=['l1', 'l2', 'lap'], default='l1', 
+parser.add_argument('--losstype', dest='loss_type', type=str, choices=['l1', 'l2'], default='l1', 
                     help="Type of image denoising loss")
 parser.add_argument('--consistlosstype', dest='consist_loss_type', type=str, 
                     choices=['l1', 'cosine'], default='l1', 
@@ -333,10 +332,12 @@ if args.ds == 'imagenet':
         dataset.save_example("imagenet128-examples")
         exit(0)
 elif args.ds == '102flowers':
-    dataset = LabeledDataset(args.ds, label_file='102flowers/102flower_labels.txt', 
+    dataset = TxtLabeledDataset(args.ds, label_file='102flowers/102flower_labels.txt', 
                              image_size=128, do_geo_aug=args.do_geo_aug)
-else:    
-    dataset = UnlabeledDataset(args.ds, image_size=128, do_geo_aug=args.do_geo_aug)
+elif args.on_multi_domain:
+    dataset = ClsByFolderDataset(args.ds, image_size=128, do_geo_aug=args.do_geo_aug)
+else:
+    dataset = SingletonDataset(args.ds, image_size=128, do_geo_aug=args.do_geo_aug)
 
 num_classes = dataset.get_num_classes()
 

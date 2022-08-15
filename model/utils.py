@@ -13,7 +13,6 @@ import timm
 from .laplacian import LapLoss
 import imgaug.augmenters as iaa
 from torchvision.transforms import ColorJitter, ToTensor, ToPILImage, Resize
-from inspect import isfunction
 import glob
 from itertools import chain
 
@@ -205,10 +204,11 @@ def aspect_preserving_resize(image, min_size=128):
     resized_image = img.resize((new_width, new_height))
     return np.array(resized_image)
 
-class UnlabeledDataset(BaseDataset):
+# Each image is treated as a singleton class.
+class SingletonDataset(BaseDataset):
     def __init__(self, root, image_size, exts = ['jpg', 'jpeg', 'png', 'JPEG', 'JPG'], 
                  do_geo_aug=True, training=True):
-        super(UnlabeledDataset, self).__init__(root, image_size, exts, do_geo_aug, training)
+        super(SingletonDataset, self).__init__(root, image_size, exts, do_geo_aug, training)
 
         self.paths = [ p for ext in exts for p in sorted(Path(f'{root}').glob(f'**/*.{ext}')) ]
         # Each class maps to a list of image indices. Since for simple datasets like pokemon,
@@ -220,10 +220,11 @@ class UnlabeledDataset(BaseDataset):
         self.index2cls   = [ i for i in range(len(self.paths)) ]
         print0("Found {} images in {}".format(len(self.paths), root))
 
-class LabeledDataset(BaseDataset):
+# Class labels are provided in a txt file.
+class TxtLabeledDataset(BaseDataset):
     def __init__(self, root, label_file, image_size, exts = ['jpg', 'jpeg', 'png', 'JPEG', 'JPG'], 
                  do_geo_aug=True, training=True):
-        super(LabeledDataset, self).__init__(root, image_size, exts, do_geo_aug, training)
+        super(TxtLabeledDataset, self).__init__(root, image_size, exts, do_geo_aug, training)
 
         with open(label_file, 'r') as f:
             lines = f.readlines()
@@ -255,23 +256,23 @@ class Imagenet(BaseDataset):
         self.map_file = os.path.join(self.root, 'map_clsloc.txt')
         assert os.path.exists(self.map_file), f'Lable mapping file not found at {self.map_file}!'
         self.folder_names, self.cls2label = self.get_folder_label_mapping()
-        # folder_list is a list of lists. Each sub-list is images in a folder (class).
+        # folder_img_list is a list of lists. Each sub-list is images in a folder (class).
         if self.split == 'test':
-            self.folder_list = [ [ p for ext in exts \
+            self.folder_img_list = [ [ p for ext in exts \
                 for p in sorted(glob.glob(os.path.join(self.root, self.split) + f'/*.{ext}')) ] ]
         else: # 'train', 'val'
-            self.folder_list = [ [ p for ext in exts \
+            self.folder_img_list = [ [ p for ext in exts \
                 # for p in Path(f'{os.path.join(self.root, self.split, fn)}').glob(f'**/*.{ext}')]\
                 for p in sorted(glob.glob(os.path.join(self.root, self.split, folder_name) + f'/*.{ext}')) ] \
                 for folder_name in self.folder_names ]
 
-        self.paths = list(chain.from_iterable(self.folder_list))
+        self.paths = list(chain.from_iterable(self.folder_img_list))
         img_indices = list(range(len(self.paths)))
         self.cls2indices = []
         self.index2cls   = []
         start_idx = 0
 
-        for cls, img_list in enumerate(self.folder_list):
+        for cls, img_list in enumerate(self.folder_img_list):
             end_idx = start_idx + len(img_list)
             self.cls2indices.append(img_indices[start_idx:end_idx])
             self.index2cls += [cls] * len(img_list)
@@ -314,9 +315,9 @@ class Imagenet(BaseDataset):
         """
         create a resized dataset "imagenet128" and keep data folder structure.
         """
-        for i in range(len(self.folder_list)):
-            for j in range(len(self.folder_list[i])):
-                old_path = self.folder_list[i][j]
+        for i in range(len(self.folder_img_list)):
+            for j in range(len(self.folder_img_list[i])):
+                old_path = self.folder_img_list[i][j]
                 dirs = old_path.split('/')
                 if self.split == 'test':
                     new_path = os.path.join(new_folder, dirs[1])
@@ -331,7 +332,36 @@ class Imagenet(BaseDataset):
                     img = img.convert("RGB")
                 img.save(os.path.join(new_path, dirs[-1]))
     '''
-    
+
+class ClsByFolderDataset(BaseDataset):
+    def __init__(self, root, image_size, exts = ['jpg', 'jpeg', 'png', 'JPEG', 'JPG'], 
+                 do_geo_aug=True, training=True):
+        super(ClsByFolderDataset, self).__init__(root, image_size, exts, do_geo_aug, training)
+
+        self.root = root
+        # folder_img_list is a list of lists. Each sub-list is images in a folder (class).
+        # 'train', 'val'
+        self.folder_img_list = [ [ p for ext in exts \
+            for p in sorted(glob.glob(os.path.join(self.root, folder_name) + f'/*.{ext}')) ] \
+            for folder_name in os.listdir(self.root) ]
+
+        self.paths = list(chain.from_iterable(self.folder_img_list))
+        img_indices = list(range(len(self.paths)))
+        self.cls2indices = []
+        self.index2cls   = []
+        start_idx = 0
+
+        for cls, img_list in enumerate(self.folder_img_list):
+            # Skip empty folders / non-folders
+            if len(img_list) == 0:
+                continue
+            end_idx = start_idx + len(img_list)
+            self.cls2indices.append(img_indices[start_idx:end_idx])
+            self.index2cls += [cls] * len(img_list)
+            start_idx = end_idx
+
+        print0("Found {} images in {}".format(len(self.paths), root))
+
 class EMA():
     def __init__(self, beta):
         super().__init__()
@@ -551,7 +581,7 @@ def unnormalize_to_zero_to_one(t):
 def unnorm_save_image(img, img_save_path, nrow, clip_denoised=True):
     if clip_denoised:
         img = dclamp(img, -1., 1.)
-        
+
     img = unnormalize_to_zero_to_one(img)
     utils.save_image(img, img_save_path, nrow=nrow)
 

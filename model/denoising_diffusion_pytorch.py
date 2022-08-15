@@ -1,18 +1,15 @@
-from doctest import NORMALIZE_WHITESPACE
 import math
 import torch
 from torch import nn, einsum
-from torch.nn import Parameter
 import torch.nn.functional as F
-from torchvision import utils
 from functools import partial
 
 import timm
 from einops import rearrange
 from .laplacian import LapLoss
-from .utils import timm_extract_features, extract_pre_feat, print0, exists, exists_add, repeat_interleave, \
+from .utils import extract_pre_feat, print0, exists, exists_add, \
                    default, normalize_to_neg_one_to_one, unnormalize_to_zero_to_one, unnorm_save_image, \
-                   UnlabeledDataset, LabeledDataset, fast_randn, fast_randn_like, dclamp, l2norm, fetch_attr 
+                   SingletonDataset, fast_randn, fast_randn_like, dclamp, l2norm, fetch_attr 
 import os
 import copy
 from tqdm.auto import tqdm
@@ -975,9 +972,9 @@ class GaussianDiffusion(nn.Module):
         b2 = b // 2
         classes1 = classes[:b2]
 
-        # In UnlabeledDataset, each image is a class. So we don't have 
+        # In SingletonDataset, each image is a class. So we don't have 
         # different same-class images to do interpolation.
-        within_same_class = not isinstance(self.dataset, UnlabeledDataset)
+        within_same_class = not isinstance(self.dataset, SingletonDataset)
 
         if within_same_class:
             img_gt1         = img_gt[:b2]
@@ -1288,15 +1285,8 @@ class GaussianDiffusion(nn.Module):
         # Compute the loss for each scale of the output image.
         for i, pred_stu in enumerate(preds_stu):
             if self.objective == 'pred_noise':
-                # Laplacian loss doesn't help. Instead, it makes convergence very slow.
-                if self.loss_type == 'lap':
-                    target = x_start
-                    # original pred_stu is predicted noise. Subtract it from noisy x to get the predicted x_start.
-                    # LapLoss always compares the predicted x_start to the original x_start.
-                    pred_stu = self.predict_start_from_noise(x, t, pred_stu)
-                else:
-                    # Compare groundtruth noise vs. predicted noise.
-                    target = noise
+                # Laplacian loss doesn't help. Instead, it makes convergence very slow. So it's removed.
+                target = noise
             elif self.objective == 'pred_x0':
                 target = x_start
             else:
