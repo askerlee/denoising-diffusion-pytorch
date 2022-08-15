@@ -488,10 +488,10 @@ class Unet(nn.Module):
 
         if self.cls_embed_type != 'none':
             if exists(classes_or_embed):
-                # classes_or_embed contains classes.
+                # classes_or_embed is 1D, i.e., it contains class labels.
                 if classes_or_embed.numel() == classes_or_embed.shape[0]:
                     cls_embed = self.cls_embedding(classes_or_embed)
-                # classes_or_embed contains embeddings.
+                # classes_or_embed is already class embeddings.
                 else:
                     cls_embed = classes_or_embed
 
@@ -666,6 +666,9 @@ class GaussianDiffusion(nn.Module):
         ddim_sampling_eta = 1.,
     ):
         super().__init__()
+        self.local_rank = int(os.environ.get('LOCAL_RANK', 0))
+        self.is_master = (self.local_rank <= 0)
+
         if isinstance(denoise_fn, torch.nn.DataParallel):
             denoise_fn_channels = denoise_fn.module.channels
             denoise_fn_out_dim  = denoise_fn.module.out_dim
@@ -879,7 +882,7 @@ class GaussianDiffusion(nn.Module):
             # classes_or_embed is initialized as random classes.
             classes_or_embed = torch.randint(0, self.num_classes, (batch,), device=device)
 
-        for t in tqdm(reversed(range(0, self.num_timesteps)), desc = 'sampling loop time step'):
+        for t in tqdm(reversed(range(0, self.num_timesteps)), desc = 'sampling loop time step', disable=not self.is_master):
             self_cond = x_start if self.self_condition else None
             img, x_start = self.p_sample(img, t, classes_or_embed, self_cond,
                                          clip_denoised=clip_denoised)
@@ -908,7 +911,7 @@ class GaussianDiffusion(nn.Module):
             # classes_or_embed is initialized as random classes.
             classes_or_embed = torch.randint(0, self.num_classes, (batch,), device=device)
 
-        for time, time_next in tqdm(time_pairs, desc = 'sampling loop time step'):
+        for time, time_next in tqdm(time_pairs, desc = 'sampling loop time step', disable=not self.is_master):
             alpha = self.alphas_cumprod_prev[time]
             alpha_next = self.alphas_cumprod_prev[time_next]
 
@@ -1058,20 +1061,19 @@ class GaussianDiffusion(nn.Module):
         
         if self.iter_count % 1000 == 0:
             cycle_idx = self.iter_count // 1000
-            local_rank = int(os.environ.get('LOCAL_RANK', 0))
-            if local_rank <= 0:
+            if self.local_rank <= 0:
                 sample_dir = f'{self.sample_dir}/interp'
                 os.makedirs(sample_dir, exist_ok=True)
-                img_gtaug_save_path  = f'{sample_dir}/{cycle_idx}-{local_rank}-aug.png'
+                img_gtaug_save_path  = f'{sample_dir}/{cycle_idx}-{self.local_rank}-aug.png'
                 unnorm_save_image(img_gt,   img_gtaug_save_path,  nrow = 8)
-                #img_gtorig_save_path = f'{sample_dir}/{cycle_idx}-{local_rank}-orig.png'
+                #img_gtorig_save_path = f'{sample_dir}/{cycle_idx}-{self.local_rank}-orig.png'
                 #unnorm_save_image(img_orig, img_gtorig_save_path, nrow = 8)
 
                 #print("GT images for interpolation are saved to", img_gt_save_path)
-                img_noisy_save_path = f'{sample_dir}/{cycle_idx}-{local_rank}-noisy.png'
+                img_noisy_save_path = f'{sample_dir}/{cycle_idx}-{self.local_rank}-noisy.png'
                 unnorm_save_image(img_noisy_interp, img_noisy_save_path, nrow = 8)
                 #print("Noisy images for interpolation are saved to", img_noisy_save_path)
-                img_pred_save_path  = f'{sample_dir}/{cycle_idx}-{local_rank}-pred.png'
+                img_pred_save_path  = f'{sample_dir}/{cycle_idx}-{self.local_rank}-pred.png'
                 unnorm_save_image(img_stu_pred, img_pred_save_path, nrow = 8)
                 #print("Predicted images are saved to", img_pred_save_path)
 
@@ -1150,21 +1152,20 @@ class GaussianDiffusion(nn.Module):
 
         if self.iter_count % 1000 == 0:
             cycle_idx = self.iter_count // 1000
-            local_rank = int(os.environ.get('LOCAL_RANK', 0))
-            if local_rank <= 0:
+            if self.local_rank <= 0:
                 sample_dir = f'{self.sample_dir}/single'
                 os.makedirs(sample_dir, exist_ok=True)
 
-                img_gtaug_save_path  = f'{sample_dir}/{cycle_idx}-{local_rank}-aug.png'
+                img_gtaug_save_path  = f'{sample_dir}/{cycle_idx}-{self.local_rank}-aug.png'
                 unnorm_save_image(img_gt2,   img_gtaug_save_path,  nrow = 8)
-                #img_gtorig_save_path = f'{sample_dir}/{cycle_idx}-{local_rank}-orig.png'
+                #img_gtorig_save_path = f'{sample_dir}/{cycle_idx}-{self.local_rank}-orig.png'
                 #unnorm_save_image(img_orig, img_gtorig_save_path, nrow = 8)
 
                 #print("GT images for single-image class guidance are saved to", img_gt_save_path)
-                img_noisy_save_path = f'{sample_dir}/{cycle_idx}-{local_rank}-noisy.png'
+                img_noisy_save_path = f'{sample_dir}/{cycle_idx}-{self.local_rank}-noisy.png'
                 unnorm_save_image(img_noisy, img_noisy_save_path, nrow = 8)
                 #print("Noisy images for single-image class guidance are saved to", img_noisy_save_path)
-                img_pred_save_path  = f'{sample_dir}/{cycle_idx}-{local_rank}-pred.png'
+                img_pred_save_path  = f'{sample_dir}/{cycle_idx}-{self.local_rank}-pred.png'
                 unnorm_save_image(img_stu_pred, img_pred_save_path, nrow = 8)
                 #print("Predicted images are saved to", img_pred_save_path)
 
