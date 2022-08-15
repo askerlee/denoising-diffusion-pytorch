@@ -71,7 +71,7 @@ def num_to_groups(num, divisor):
 # A simple dataset class.
 class BaseDataset(data.Dataset):
     def __init__(self, root, image_size, exts = ['jpg', 'jpeg', 'png', 'JPEG', 'JPG'], 
-                 do_geo_aug=True, training=True):
+                 do_geo_aug=True, do_color_aug=True, training=True):
         super().__init__()
         self.root = root
         self.image_size = image_size
@@ -80,30 +80,26 @@ class BaseDataset(data.Dataset):
         self.cls2indices = []
         self.index2cls = []
 
-        self.test_transform = transforms.Compose([
-            ToPILImage(),
-            Resize((image_size, image_size)),
-            ToTensor()
-        ])
-
         self.do_geo_aug = do_geo_aug
         if self.do_geo_aug:
             affine_prob     = 0.1
             perspect_prob   = 0.1 
         else:
+            # Disable Affine and PerspectiveTransform. So just random cropping and resizing.
             affine_prob     = 0.0
             perspect_prob   = 0.0
-            
+        
+        self.do_color_aug = do_color_aug
+        if self.do_color_aug:
+            gamma_prob = 0.3
+        else:
+            gamma_prob = 0.0
+
         tgt_height = tgt_width = image_size
         self.geo_aug_func = iaa.Sequential(
                 [
-                    # Resize the image to the size (h, w). When the original image is too big, 
-                    # the first resizing avoids cropping too small fractions of the whole image.
-                    # For Sintel, (h, w) = (288, 680), around 2/3 of the original image size (436, 1024).
-                    # For Vimeo,  (h, w) = (256, 488) is the same as the original image size.
-                    # iaa.Resize({ 'height': self.h, 'width': self.w }),
-                    # As tgt_width=tgt_height=224, the aspect ratio is always 1.
-                    # Randomly crop to 256*256 (Vimeo) or 288*288 (Sintel).
+                    # Crop the image to the target aspect ratio. Then random crop off border pixels. 
+                    # Then resize to the target size.
                     iaa.CropToAspectRatio(aspect_ratio=tgt_width/tgt_height, position='uniform'),
                     # Crop a random length from uniform(0, 2*delta) (equal length at four sides). 
                     # The mean crop length is delta, and the mean size of the output image is
@@ -129,19 +125,24 @@ class BaseDataset(data.Dataset):
                     )),
                     iaa.Sometimes(perspect_prob, 
                                   iaa.PerspectiveTransform(scale=(0.01, 0.15), cval=(0,255), mode='constant')), 
-                    iaa.Sometimes(0.3, iaa.GammaContrast((0.7, 1.7))),    # Gamma contrast degrades?
-                    # When tgt_width==tgt_height, PadToFixedSize and CropToFixedSize are unnecessary.
-                    # Otherwise, we have to take care if the longer edge is rotated to the shorter edge.
-                    # iaa.PadToFixedSize(width=tgt_width,  height=tgt_height),
-                    # iaa.CropToFixedSize(width=tgt_width, height=tgt_height),
+                    iaa.Sometimes(gamma_prob, iaa.GammaContrast((0.7, 1.7))),    # Gamma contrast degrades?
                 ])
 
-        self.tv_transform = transforms.Compose([
+        self.test_transform = transforms.Compose([
             ToPILImage(),
             Resize((image_size, image_size)),
-            ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.5/3.14),
             ToTensor()
         ])
+
+        if self.do_color_aug:
+            self.tv_transform = self.test_transform     # No color jitter.
+        else:
+            self.tv_transform = transforms.Compose([
+                ToPILImage(),
+                Resize((image_size, image_size)),
+                ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.5/3.14),
+                ToTensor()
+            ])
 
     def __len__(self):
         return len(self.paths)
@@ -149,10 +150,13 @@ class BaseDataset(data.Dataset):
     def __getitem__(self, index):
         path = self.paths[index]
         img = np.array(Image.open(path).convert('RGB'))
+        # img_orig is a tensor of (image_size, image_size). 
+        # We don't take care of the aspect ratio, as img_orig is only used for visualization.
         img_orig = self.test_transform(img)
 
         if self.training:
-            img_aug = self.geo_aug_func.augment_image(np.array(img)).copy()
+            # copy() to make the numpy array continuous.
+            img_aug = self.geo_aug_func.augment_image(img).copy()
             img_aug = self.tv_transform(img_aug)
         else:
             img_aug = img_orig
@@ -207,8 +211,8 @@ def aspect_preserving_resize(image, min_size=128):
 # Each image is treated as a singleton class.
 class SingletonDataset(BaseDataset):
     def __init__(self, root, image_size, exts = ['jpg', 'jpeg', 'png', 'JPEG', 'JPG'], 
-                 do_geo_aug=True, training=True):
-        super(SingletonDataset, self).__init__(root, image_size, exts, do_geo_aug, training)
+                 do_geo_aug=True, do_color_aug=True, training=True):
+        super(SingletonDataset, self).__init__(root, image_size, exts, do_geo_aug, do_color_aug, training)
 
         self.paths = [ p for ext in exts for p in sorted(Path(f'{root}').glob(f'**/*.{ext}')) ]
         # Each class maps to a list of image indices. Since for simple datasets like pokemon,
@@ -223,8 +227,8 @@ class SingletonDataset(BaseDataset):
 # Class labels are provided in a txt file.
 class TxtLabeledDataset(BaseDataset):
     def __init__(self, root, label_file, image_size, exts = ['jpg', 'jpeg', 'png', 'JPEG', 'JPG'], 
-                 do_geo_aug=True, training=True):
-        super(TxtLabeledDataset, self).__init__(root, image_size, exts, do_geo_aug, training)
+                 do_geo_aug=True, do_color_aug=True, training=True):
+        super(TxtLabeledDataset, self).__init__(root, image_size, exts, do_geo_aug, do_color_aug, training)
 
         with open(label_file, 'r') as f:
             lines = f.readlines()
@@ -248,8 +252,8 @@ class TxtLabeledDataset(BaseDataset):
 
 class Imagenet(BaseDataset):
     def __init__(self, root='imagenet128', image_size=128, split = 'train', \
-        exts = ['jpg', 'jpeg', 'png', 'JPEG', 'JPG'], do_geo_aug=True, training=True):
-        super(Imagenet, self).__init__(root, image_size, exts, do_geo_aug, training)
+        exts = ['jpg', 'jpeg', 'png', 'JPEG', 'JPG'], do_geo_aug=True, do_color_aug=True, training=True):
+        super(Imagenet, self).__init__(root, image_size, exts, do_geo_aug, do_color_aug, training)
 
         self.root = root
         self.split = split
@@ -335,8 +339,8 @@ class Imagenet(BaseDataset):
 
 class ClsByFolderDataset(BaseDataset):
     def __init__(self, root, image_size, exts = ['jpg', 'jpeg', 'png', 'JPEG', 'JPG'], 
-                 do_geo_aug=True, training=True):
-        super(ClsByFolderDataset, self).__init__(root, image_size, exts, do_geo_aug, training)
+                 do_geo_aug=True, do_color_aug=True, training=True):
+        super(ClsByFolderDataset, self).__init__(root, image_size, exts, do_geo_aug, do_color_aug, training)
 
         self.root = root
         # folder_img_list is a list of lists. Each sub-list is images in a folder (class).

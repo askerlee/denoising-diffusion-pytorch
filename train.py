@@ -335,7 +335,7 @@ elif args.ds == '102flowers':
     dataset = TxtLabeledDataset(args.ds, label_file='102flowers/102flower_labels.txt', 
                              image_size=128, do_geo_aug=args.do_geo_aug)
 elif args.on_multi_domain:
-    dataset = ClsByFolderDataset(args.ds, image_size=128, do_geo_aug=args.do_geo_aug)
+    dataset = ClsByFolderDataset(args.ds, image_size=128, do_geo_aug=args.do_geo_aug, do_color_aug=False)
     args.cls_guide_type = 'single'
 else:
     dataset = SingletonDataset(args.ds, image_size=128, do_geo_aug=args.do_geo_aug)
