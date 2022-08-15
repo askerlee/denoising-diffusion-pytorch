@@ -1000,7 +1000,7 @@ class GaussianDiffusion(nn.Module):
         # Normalize w into [min_interp_w, 1-min_interp_w], i.e., [0.2, 0.8].
         w = (1 - 2 * min_interp_w) * w + min_interp_w
         # w.shape: (b2, 1, 1, 1)
-        w = w.view(b2, *((1,) * (len(img_gt.shape) - 1)))
+        # w = w.view(b2, *((1,) * (len(img_gt.shape) - 1)))
 
         noise = fast_randn_like(img_gt)
         if noise_scheme == 'pure_noise':
