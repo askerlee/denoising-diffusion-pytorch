@@ -361,7 +361,7 @@ class ClsByFolderDataset(BaseDataset):
         self.index2cls   = []
         start_idx = 0
 
-        print0("{} images in {} loaded.".format(len(self.paths), root))
+        print0("{} images in '{}' loaded.".format(len(self.paths), root))
 
         for cls, img_list in enumerate(self.folder_img_list):
             # Skip empty folders / non-folders
@@ -372,8 +372,7 @@ class ClsByFolderDataset(BaseDataset):
             self.index2cls += [cls] * len(img_list)
             start_idx = end_idx
             folder_name = folder_names[cls]
-            first_filename = img_list[0].split('/')[-1]
-            print0("{} images in {}. First: {}".format(len(img_list), folder_name, first_filename))
+            print0("{} images in '{}'. First: '{}'".format(len(img_list), folder_name, img_list[0]))
 
 class EMA():
     def __init__(self, beta):
