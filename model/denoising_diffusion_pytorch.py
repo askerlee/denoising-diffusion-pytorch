@@ -929,12 +929,9 @@ class GaussianDiffusion(nn.Module):
         if exists(dataset):
             if exists(classes):
                 # Take the first image as the representative image of each class in classes.
-                nn_img_indices = [ dataset.cls2indices[cls][0] for cls in classes.tolist() ]
-                old_training_status = dataset.training
+                nn_img_indices  = [ dataset.cls2indices[cls][0] for cls in classes.tolist() ]
                 # training = False: Disable augmentation of fetched images.
-                dataset.training = False
-                nn_img_list = [ dataset[idx]['img'] for idx in nn_img_indices ]
-                dataset.training = old_training_status
+                nn_img_list     = [ dataset[idx]['img_orig'] for idx in nn_img_indices ]
                 nn_img = torch.stack(nn_img_list, dim=0).to(img.device)
             else:
                 # Stub. Write VGG-based nn search code later.

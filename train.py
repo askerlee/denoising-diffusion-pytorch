@@ -32,12 +32,12 @@ class Trainer(object):
         gradient_accumulate_every = 2,
         grad_clip = -1,
         amp = True,
+        num_workers = 3,
         step_start_ema = 2000,
         ema_update_every = 10,
         save_and_sample_every = 1000,
         sample_dir = 'samples',
         cp_dir = 'checkpoints',
-        num_workers = 3,
         debug = False,
     ):
         super().__init__()
@@ -341,7 +341,8 @@ elif args.on_multi_domain:
     dataset = ClsByFolderDataset(args.ds, image_size=128, do_geo_aug=args.do_geo_aug, do_color_aug=False)
     args.cls_guide_type = 'single'
 else:
-    dataset = SingletonDataset(args.ds, image_size=128, do_geo_aug=args.do_geo_aug, do_color_aug=args.do_color_aug)
+    dataset = SingletonDataset(args.ds, image_size=128, do_geo_aug=args.do_geo_aug, 
+                               do_color_aug=args.do_color_aug)
 
 num_classes = dataset.get_num_classes()
 
@@ -421,10 +422,10 @@ trainer = Trainer(
     grad_clip = args.grad_clip,         # default: -1, disabled.
     ema_decay = 0.995,                  # exponential moving average decay
     amp = args.amp,                     # turn on mixed precision. Default: True
+    num_workers = args.num_workers,
+    save_and_sample_every = args.save_sample_interval,
     sample_dir  = args.sample_dir,
     cp_dir      = args.cp_dir,
-    save_and_sample_every = args.save_sample_interval,
-    num_workers=args.num_workers,
 )
 
 trainer.train()

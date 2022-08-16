@@ -42,6 +42,11 @@ def exists_add(x, a):
     else:
         return a
 
+def default(val, d):
+    if exists(val):
+        return val
+    return d() if callable(d) else d
+
 def fetch_attr(model, attr_name):
     if isinstance(model, torch.nn.DataParallel):
         return model.module.__dict__[attr_name]
@@ -345,15 +350,18 @@ class ClsByFolderDataset(BaseDataset):
         self.root = root
         # folder_img_list is a list of lists. Each sub-list is images in a folder (class).
         # 'train', 'val'
+        folder_names = list(os.listdir(self.root))
         self.folder_img_list = [ [ p for ext in exts \
             for p in sorted(glob.glob(os.path.join(self.root, folder_name) + f'/*.{ext}')) ] \
-            for folder_name in os.listdir(self.root) ]
+            for folder_name in folder_names ]
 
         self.paths = list(chain.from_iterable(self.folder_img_list))
         img_indices = list(range(len(self.paths)))
         self.cls2indices = []
         self.index2cls   = []
         start_idx = 0
+
+        print0("{} images in {} loaded.".format(len(self.paths), root))
 
         for cls, img_list in enumerate(self.folder_img_list):
             # Skip empty folders / non-folders
@@ -363,8 +371,9 @@ class ClsByFolderDataset(BaseDataset):
             self.cls2indices.append(img_indices[start_idx:end_idx])
             self.index2cls += [cls] * len(img_list)
             start_idx = end_idx
-
-        print0("Found {} images in {}".format(len(self.paths), root))
+            folder_name = folder_names[cls]
+            first_filename = img_list[0].split('/')[-1]
+            print0("{} images in {}. First: {}".format(len(img_list), folder_name, first_filename))
 
 class EMA():
     def __init__(self, beta):
@@ -389,6 +398,7 @@ class DistributedDataParallelPassthrough(torch.nn.parallel.DistributedDataParall
             return getattr(self.module, name)
 
 def sample_images(model, num_images, batch_size, dataset, img_save_path, nn_save_path):
+    # Split num_images into batches of size batch_size, with possibly some leftover.
     batches = num_to_groups(num_images, batch_size)
 
     old_rng_state = torch.random.get_rng_state()
@@ -404,6 +414,29 @@ def sample_images(model, num_images, batch_size, dataset, img_save_path, nn_save
     model.sample_rng_state = torch.random.get_rng_state()
     # Restore the training random state.
     torch.random.set_rng_state(old_rng_state)
+
+    all_images_list, all_nn_list = zip(*all_images_nn_list)
+    all_images      = torch.cat(all_images_list, dim=0)
+    utils.save_image(all_images,    img_save_path, nrow = 6)
+    print0(f"Sampled {img_save_path}. ", end="")
+
+    # If all_nn_list[0] is not None, then all elements in all_nn_list are not None.
+    if exists(all_nn_list[0]):
+        all_nn_images = torch.cat(all_nn_list, dim=0)
+        utils.save_image(all_nn_images, nn_save_path, nrow = 6)
+        print0(f"Nearest neighbors {nn_save_path}.")
+    else:
+        print0("")
+
+
+def translate_images(model, num_images, batch_size, dataset, img_save_path, nn_save_path):
+    # Split num_images into batches of size batch_size, with possibly some leftover.
+    batches = num_to_groups(num_images, batch_size)
+
+    # In all_images_list, each element is a batch of images.
+    # In all_nn_list, if dataset is provided, each element is a batch of nearest neighbor images. 
+    # Otherwise, all_nn_list is a list of None.
+    all_images_nn_list = list(map(lambda n: model.sample(batch_size=n, dataset=dataset), batches))
 
     all_images_list, all_nn_list = zip(*all_images_nn_list)
     all_images      = torch.cat(all_images_list, dim=0)
@@ -571,10 +604,6 @@ def repeat_interleave(x, n, dim):
     x_new = x_rep.reshape(new_shape)
     return x_new
 
-def default(val, d):
-    if exists(val):
-        return val
-    return d() if callable(d) else d
 
 def normalize_to_neg_one_to_one(img):
     return img * 2 - 1
