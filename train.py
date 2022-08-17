@@ -1,4 +1,4 @@
-from model import Unet, GaussianDiffusion, \
+from model import Unet, GaussianDiffusion, EMA, \
                   WeightedDistributedSampler, \
                   cycle, DistributedDataParallelPassthrough, \
                   sample_images, AverageMeters, print0, reduce_tensor, create_training_dataset_sampler
@@ -14,7 +14,6 @@ from tqdm.auto import tqdm
 import random
 import numpy as np
 import re
-from .ema_pytorch import EMA
 
 # trainer class
 class Trainer(object):
