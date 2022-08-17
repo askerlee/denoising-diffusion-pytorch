@@ -84,16 +84,12 @@ class Trainer(object):
         os.makedirs(sample_dir, exist_ok=True)
         os.makedirs(cp_dir, exist_ok=True)
 
-        self.reset_parameters()
         self.loss_meter = AverageMeters()
 
         # Sampling uses a random generator independent from training, 
         # to facililtate comparison of different methods in terms of generation quality.
         self.sample_rand_generator = torch.Generator()
         self.sample_rand_generator.manual_seed(sample_seed)
-
-    def reset_parameters(self):
-        self.ema_model.load_state_dict(self.model.state_dict())
 
     def save(self, milestone):
         if self.local_rank > 0:
@@ -193,7 +189,8 @@ class Trainer(object):
                         nn_save_path  = f'{self.sample_dir}/{milestone:03}-nn.png'
                         self.save(milestone)
                         # self.dataset is provided for nearest neighbor imgae search.
-                        sample_images(self.ema_model, 36, 36, self.dataset, img_save_path, nn_save_path)               
+                        sample_images(self.ema, self.sample_rand_generator, 36, 36, 
+                                      self.dataset, img_save_path, nn_save_path)               
 
                 self.step += 1
                 pbar.update(1)
