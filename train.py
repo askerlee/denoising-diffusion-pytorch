@@ -14,7 +14,7 @@ from tqdm.auto import tqdm
 import random
 import numpy as np
 import re
-from ema_pytorch import EMA
+from .ema_pytorch import EMA
 
 # trainer class
 class Trainer(object):
