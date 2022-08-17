@@ -1,12 +1,12 @@
 from model import Unet, GaussianDiffusion, \
-                  SingletonDataset, TxtLabeledDataset, Imagenet, ClsByFolderDataset, \
+                  WeightedDistributedSampler, \
                   EMA, cycle, DistributedDataParallelPassthrough, \
-                  sample_images, AverageMeters, print0, reduce_tensor
+                  sample_images, AverageMeters, print0, reduce_tensor, create_training_dataset_sampler
 import argparse
 import torch
 from torch.cuda.amp import autocast, GradScaler
 from torch.optim import Adam
-from torch.utils.data.distributed import DistributedSampler
+# from torch.utils.data.distributed import DistributedSampler
 from torch.utils import data
 import os
 import copy
@@ -21,6 +21,7 @@ class Trainer(object):
         self,
         diffusion_model,
         dataset,
+        data_sampler,
         local_rank = -1,
         world_size = 1,
         ema_decay = 0.995,
@@ -60,17 +61,15 @@ class Trainer(object):
         self.dataset = dataset
         self.debug = debug
         if not self.debug:
-            # DistributedSampler does shuffling by default.
-            sampler = DistributedSampler(self.dataset)
+            # DistributedSampler does shuffling by default. So no need to shuffle in the dataloader.
             shuffle = False
         else:
-            sampler = None
             shuffle = True
 
-        self.dl = cycle(data.DataLoader(self.dataset, batch_size = train_batch_size, sampler = sampler, 
+        self.dl = cycle(data.DataLoader(self.dataset, batch_size = train_batch_size, sampler = data_sampler, 
                                         shuffle = shuffle, pin_memory = True, 
                                         drop_last = True, num_workers = num_workers),
-                        sampler)
+                        data_sampler)
         self.opt = Adam(diffusion_model.parameters(), lr=train_lr, weight_decay=weight_decay, betas=adam_betas)
 
         self.step = 0
@@ -326,24 +325,7 @@ torch.manual_seed(args.seed)
 torch.cuda.manual_seed_all(args.seed)
 torch.backends.cudnn.benchmark = True
 
-if args.ds == 'imagenet':
-    dataset = Imagenet(args.ds, image_size=128, split='train', 
-                       do_geo_aug=args.do_geo_aug, do_color_aug=args.do_color_aug)
-    save_sample_images = False
-    if save_sample_images:
-        dataset.training = False
-        dataset.save_example("imagenet128-examples")
-        exit(0)
-elif args.ds == '102flowers':
-    dataset = TxtLabeledDataset(args.ds, label_file='102flowers/102flower_labels.txt', 
-                             image_size=128, do_geo_aug=args.do_geo_aug, do_color_aug=False)
-elif args.on_multi_domain:
-    dataset = ClsByFolderDataset(args.ds, image_size=128, do_geo_aug=args.do_geo_aug, do_color_aug=False)
-    args.cls_guide_type = 'single'
-else:
-    dataset = SingletonDataset(args.ds, image_size=128, do_geo_aug=args.do_geo_aug, 
-                               do_color_aug=args.do_color_aug)
-
+dataset, data_sampler = create_training_dataset_sampler(args)
 num_classes = dataset.get_num_classes()
 
 print0(f"world size: {args.world_size}, batch size per GPU: {args.batch_size}, seed: {args.seed}")
@@ -386,8 +368,8 @@ diffusion = GaussianDiffusion(
     cls_guide_loss_weight = args.cls_guide_loss_weight,
     align_tea_stu_feat_weight = args.align_tea_stu_feat_weight,
     sample_dir = args.sample_dir,
+    sample_seed = args.sampleseed,
     debug = args.debug,
-    sampleseed = args.sampleseed,
 )
 
 diffusion.cuda()
@@ -413,6 +395,7 @@ if args.sample_only:
 trainer = Trainer(
     diffusion,
     dataset,                            # Dataset instance.
+    data_sampler,
     local_rank = args.local_rank,       # Local rank of the process.
     world_size = args.world_size,       # Total number of processes.
     train_batch_size = args.batch_size, # default: 32

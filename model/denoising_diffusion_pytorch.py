@@ -655,9 +655,9 @@ class GaussianDiffusion(nn.Module):
         cls_guide_loss_weight = 0.01,
         align_tea_stu_feat_weight = 0,
         sample_dir = 'samples',      
-        debug = False,
-        sampleseed = 5678,
+        sample_seed = 5678,
         ddim_sampling_eta = 1.,
+        debug = False,
     ):
         super().__init__()
         self.local_rank = int(os.environ.get('LOCAL_RANK', 0))
@@ -698,11 +698,10 @@ class GaussianDiffusion(nn.Module):
         self.alpha_beta_schedule = alpha_beta_schedule
         self.iter_count = 0
 
-        # Sampling uses independent noises and random seeds from training.
-        old_rng_state = torch.get_rng_state()
-        torch.manual_seed(sampleseed)
-        self.sample_rng_state = torch.get_rng_state()
-        torch.set_rng_state(old_rng_state)
+        # Sampling uses a random generator independent from training, 
+        # to facililtate comparison of different methods in terms of generation quality.
+        self.sample_rand_generator = torch.Generator()
+        self.sample_rand_generator.manual_seed(sample_seed)
 
         if self.alpha_beta_schedule == 'cosb':
             print0("Use cosine_beta_schedule")
@@ -851,11 +850,11 @@ class GaussianDiffusion(nn.Module):
 
     # Sampled image pixels are between [-1, 1]. Need to unnormalize_to_zero_to_one() before output.
     def p_sample_loop(self, shape, noise=None, classes_or_embed=None, 
-                      clip_denoised=True):
+                      clip_denoised=True, generator=None):
         batch, device = shape[0], self.betas.device
 
         if noise is None:
-            img = fast_randn(shape, device=device)
+            img = fast_randn(shape, device=device, generator=generator)
         else:
             img = noise
 
@@ -865,7 +864,7 @@ class GaussianDiffusion(nn.Module):
             classes_or_embed = None
         elif classes_or_embed is None:
             # classes_or_embed is initialized as random classes.
-            classes_or_embed = torch.randint(0, self.num_classes, (batch,), device=device)
+            classes_or_embed = torch.randint(0, self.num_classes, (batch,), device=device, generator=generator)
 
         for t in tqdm(reversed(range(0, self.num_timesteps)), desc = 'sampling loop time step', disable=not self.is_master):
             self_cond = x_start if self.self_condition else None
@@ -876,7 +875,7 @@ class GaussianDiffusion(nn.Module):
         return img, classes_or_embed
 
     @torch.no_grad()
-    def ddim_sample(self, shape, noise=None, classes_or_embed=None, clip_denoised = True):
+    def ddim_sample(self, shape, noise=None, classes_or_embed=None, clip_denoised=True, generator=None):
         batch, device, total_timesteps, sampling_timesteps, eta, objective = shape[0], self.betas.device, self.num_timesteps, self.sampling_timesteps, self.ddim_sampling_eta, self.objective
 
         times = torch.linspace(0., total_timesteps, steps = sampling_timesteps + 2)[:-1]
@@ -884,7 +883,7 @@ class GaussianDiffusion(nn.Module):
         time_pairs = list(zip(times[:-1], times[1:]))
 
         if noise is None:
-            img = fast_randn(shape, device=device)
+            img = fast_randn(shape, device=device, generator=generator)
         else:
             img = noise
 
@@ -894,7 +893,7 @@ class GaussianDiffusion(nn.Module):
             classes_or_embed = None
         elif classes_or_embed is None:
             # classes_or_embed is initialized as random classes.
-            classes_or_embed = torch.randint(0, self.num_classes, (batch,), device=device)
+            classes_or_embed = torch.randint(0, self.num_classes, (batch,), device=device, generator=generator)
 
         for time, time_next in tqdm(time_pairs, desc = 'sampling loop time step', disable=not self.is_master):
             alpha = self.alphas_cumprod_prev[time]
@@ -920,11 +919,11 @@ class GaussianDiffusion(nn.Module):
         return img, classes_or_embed
 
     @torch.no_grad()
-    def sample(self, batch_size = 16, dataset=None):
+    def sample(self, batch_size = 16, dataset=None, generator=None):
         image_size, channels = self.image_size, self.channels
         sample_fn = self.p_sample_loop if not self.is_ddim_sampling else self.ddim_sample
 
-        img, classes = sample_fn((batch_size, channels, image_size, image_size))
+        img, classes = sample_fn((batch_size, channels, image_size, image_size), generator=generator)
         # Find nearest neighbors in dataset.
         if exists(dataset):
             if exists(classes):

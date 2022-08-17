@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils import data
+from torch.utils.data.distributed import DistributedSampler
 from torchvision import transforms, utils
 import torch.distributed as dist
 
@@ -73,7 +74,7 @@ def num_to_groups(num, divisor):
         arr.append(remainder)
     return arr
     
-# A simple dataset class.
+# A simple dataset class. By default training=True.
 class BaseDataset(data.Dataset):
     def __init__(self, root, image_size, exts = ['jpg', 'jpeg', 'png', 'JPEG', 'JPG'], 
                  do_geo_aug=True, do_color_aug=True, training=True):
@@ -362,17 +363,83 @@ class ClsByFolderDataset(BaseDataset):
         start_idx = 0
 
         print0("{} images in '{}' loaded.".format(len(self.paths), root))
+        # Weight of each sample for WeightedRandomSampler, to do class-balanced sampling.
+        self.sample_weights = []
 
-        for cls, img_list in enumerate(self.folder_img_list):
+        cls = 0
+        for img_list in self.folder_img_list:
             # Skip empty folders / non-folders
             if len(img_list) == 0:
                 continue
             end_idx = start_idx + len(img_list)
             self.cls2indices.append(img_indices[start_idx:end_idx])
             self.index2cls += [cls] * len(img_list)
+            self.sample_weights += [1./len(img_list)] * len(img_list)
             start_idx = end_idx
             folder_name = folder_names[cls]
             print0("{} images in '{}'. First: '{}'".format(len(img_list), folder_name, img_list[0]))
+            cls += 1
+
+# oversampling_ratio: pseudo-dataset with *oversampling_ratio* times the number of images in the original dataset.
+# This is to make sure that the sampled frequency of each image is indeed roughly proportional to its weight.
+class WeightedOversamplingWrapper(data.Dataset):
+    def __init__(self, dataset, oversampling_ratio=5):
+        self.dataset = dataset
+        self.num_samples = len(dataset) * oversampling_ratio
+        self.resample()
+
+    def __len__(self):
+        return self.num_samples
+
+    def __getitem__(self, index):
+        return self.dataset[self.sample_indices[index]]
+
+    def resample(self):
+        self.sample_indices = list(iter(data.WeightedRandomSampler(self.dataset.sample_weights, self.num_samples, replacement=True)))
+
+# Class-balanced sampling wrapper for DistributedSampler.
+class WeightedDistributedSampler(DistributedSampler):
+    def __init__(self, dataset, num_replicas=None, rank=None, shuffle=True):
+        self.dataset = WeightedOversamplingWrapper(dataset)
+        super().__init__(self.dataset, num_replicas, rank, shuffle)
+
+    # set_epoch() is called by cycle() after an epoch finishes.
+    # dataset.resample() is called to reset the sampled indices, so that potential bias is reduced.
+    def set_epoch(self, epoch):
+        self.epoch = epoch
+        self.dataset.resample()
+
+def create_training_dataset_sampler(args, save_sample_images_and_exit=False):
+    if args.ds == 'imagenet':
+        dataset = Imagenet(args.ds, image_size=128, split='train', 
+                           do_geo_aug=args.do_geo_aug, do_color_aug=args.do_color_aug)
+
+    elif args.ds == '102flowers':
+        dataset = TxtLabeledDataset(args.ds, label_file='102flowers/102flower_labels.txt', 
+                                image_size=128, do_geo_aug=args.do_geo_aug, do_color_aug=False)
+    elif args.on_multi_domain:
+        dataset = ClsByFolderDataset(args.ds, image_size=128, do_geo_aug=args.do_geo_aug, do_color_aug=False)
+        args.cls_guide_type = 'single'
+    else:
+        dataset = SingletonDataset(args.ds, image_size=128, do_geo_aug=args.do_geo_aug, 
+                                do_color_aug=args.do_color_aug)
+
+    if save_sample_images_and_exit:
+        dataset.training = False
+        dataset.save_example("imagenet128-examples")
+        exit(0)
+
+    if not args.debug:
+        if args.on_multi_domain:
+            # Use WeightedDistributedSampler to do class-balanced sampling.
+            sampler = WeightedDistributedSampler(dataset)
+        else:
+            # Use a normal DistributedSampler, as class-balancing is not needed.
+            sampler = DistributedSampler(dataset)
+    else:
+        sampler = None
+
+    return dataset, sampler
 
 class EMA():
     def __init__(self, beta):
@@ -400,19 +467,13 @@ def sample_images(model, num_images, batch_size, dataset, img_save_path, nn_save
     # Split num_images into batches of size batch_size, with possibly some leftover.
     batches = num_to_groups(num_images, batch_size)
 
-    old_rng_state = torch.random.get_rng_state()
-    # Sampling uses independent noises and random seeds from training.
-    torch.random.set_rng_state(model.sample_rng_state)
+    # Sampling uses a random generator independent from training, to compare quality of generated images.
+    generator = model.sample_rand_generator
     
     # In all_images_list, each element is a batch of images.
     # In all_nn_list, if dataset is provided, each element is a batch of nearest neighbor images. 
     # Otherwise, all_nn_list is a list of None.
-    all_images_nn_list = list(map(lambda n: model.sample(batch_size=n, dataset=dataset), batches))
-
-    # Update sample_rng_state.
-    model.sample_rng_state = torch.random.get_rng_state()
-    # Restore the training random state.
-    torch.random.set_rng_state(old_rng_state)
+    all_images_nn_list = list(map(lambda n: model.sample(batch_size=n, dataset=dataset, generator=generator), batches))
 
     all_images_list, all_nn_list = zip(*all_images_nn_list)
     all_images      = torch.cat(all_images_list, dim=0)
@@ -620,14 +681,14 @@ def unnorm_save_image(img, img_save_path, nrow, clip_denoised=True):
 def l2norm(t):
     return F.normalize(t, dim = -1)
 
-def fast_randn(*shape, device='cpu'):
+def fast_randn(*shape, device='cpu', generator=None):
     if type(shape[0]) == tuple:
         shape = shape[0]
 
     if str(device) == 'cpu':
-        return torch.FloatTensor(*shape).normal_()
+        return torch.FloatTensor(*shape).normal_(generator=generator)
     else:
-        return torch.cuda.FloatTensor(*shape).normal_()
+        return torch.cuda.FloatTensor(*shape).normal_(generator=generator)
 
 def fast_randn_like(tens):
     return fast_randn(tens.shape, device=tens.device)
