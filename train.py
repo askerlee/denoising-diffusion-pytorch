@@ -38,14 +38,19 @@ class Trainer(object):
         ema_decay = 0.995,
         save_and_sample_every = 1000,
         sample_dir = 'samples',
+        sample_seed = 5678,
         cp_dir = 'checkpoints',
         debug = False,
     ):
         super().__init__()
         # model: GaussianDiffusion instance.
         self.model = diffusion_model
-        self.ema = EMA(diffusion_model, beta = ema_decay, update_every = ema_update_every, 
-                       update_after_step=ema_update_after_step)
+        self.local_rank = local_rank
+        self.is_master = (self.local_rank <= 0)
+
+        if self.is_master:
+            self.ema = EMA(diffusion_model, beta = ema_decay, update_every = ema_update_every, 
+                        update_after_step=ema_update_after_step)
 
         self.save_and_sample_every = save_and_sample_every
 
@@ -54,7 +59,6 @@ class Trainer(object):
         self.grad_clip = grad_clip
         self.train_num_steps = train_num_steps
 
-        self.local_rank = local_rank
         self.world_size = world_size
         self.dataset = dataset
         self.debug = debug
@@ -82,6 +86,11 @@ class Trainer(object):
 
         self.reset_parameters()
         self.loss_meter = AverageMeters()
+
+        # Sampling uses a random generator independent from training, 
+        # to facililtate comparison of different methods in terms of generation quality.
+        self.sample_rand_generator = torch.Generator()
+        self.sample_rand_generator.manual_seed(sample_seed)
 
     def reset_parameters(self):
         self.ema_model.load_state_dict(self.model.state_dict())
@@ -118,8 +127,7 @@ class Trainer(object):
         self.scaler.load_state_dict(data['scaler'])
 
     def train(self):
-        is_master = (self.local_rank <= 0)
-        with tqdm(initial = self.step, total = self.train_num_steps, disable=not is_master) as pbar:
+        with tqdm(initial = self.step, total = self.train_num_steps, disable=not self.is_master) as pbar:
 
             while self.step < self.train_num_steps:
                 self.model.denoise_fn.pre_update()
@@ -172,7 +180,7 @@ class Trainer(object):
 
                 self.model.denoise_fn.post_update()
                 
-                if is_master:
+                if self.is_master:
                     self.ema.update()
 
                     if self.step != 0 and self.step % self.save_and_sample_every == 0:
@@ -360,7 +368,6 @@ diffusion = GaussianDiffusion(
     cls_guide_loss_weight = args.cls_guide_loss_weight,
     align_tea_stu_feat_weight = args.align_tea_stu_feat_weight,
     sample_dir = args.sample_dir,
-    sample_seed = args.sampleseed,
     debug = args.debug,
 )
 
@@ -400,6 +407,7 @@ trainer = Trainer(
     num_workers = args.num_workers,
     save_and_sample_every = args.save_sample_interval,
     sample_dir  = args.sample_dir,
+    sample_seed = args.sampleseed,
     cp_dir      = args.cp_dir,
 )
 

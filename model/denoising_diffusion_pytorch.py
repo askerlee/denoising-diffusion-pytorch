@@ -655,7 +655,6 @@ class GaussianDiffusion(nn.Module):
         cls_guide_loss_weight = 0.01,
         align_tea_stu_feat_weight = 0,
         sample_dir = 'samples',      
-        sample_seed = 5678,
         ddim_sampling_eta = 1.,
         debug = False,
     ):
@@ -697,11 +696,6 @@ class GaussianDiffusion(nn.Module):
         self.num_timesteps      = num_timesteps
         self.alpha_beta_schedule = alpha_beta_schedule
         self.iter_count = 0
-
-        # Sampling uses a random generator independent from training, 
-        # to facililtate comparison of different methods in terms of generation quality.
-        self.sample_rand_generator = torch.Generator()
-        self.sample_rand_generator.manual_seed(sample_seed)
 
         if self.alpha_beta_schedule == 'cosb':
             print0("Use cosine_beta_schedule")

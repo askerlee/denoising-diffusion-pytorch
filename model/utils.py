@@ -464,17 +464,16 @@ class DistributedDataParallelPassthrough(torch.nn.parallel.DistributedDataParall
         except AttributeError:
             return getattr(self.module, name)
 
-def sample_images(model, num_images, batch_size, dataset, img_save_path, nn_save_path):
+# rand_generator: sampling uses a random generator independent from training, 
+# to allow comparison of quality of generated images across methods/settings.
+def sample_images(model, rand_generator, num_images, batch_size, dataset, img_save_path, nn_save_path):
     # Split num_images into batches of size batch_size, with possibly some leftover.
     batches = num_to_groups(num_images, batch_size)
-
-    # Sampling uses a random generator independent from training, to compare quality of generated images.
-    generator = model.sample_rand_generator
     
     # In all_images_list, each element is a batch of images.
     # In all_nn_list, if dataset is provided, each element is a batch of nearest neighbor images. 
     # Otherwise, all_nn_list is a list of None.
-    all_images_nn_list = list(map(lambda n: model.sample(batch_size=n, dataset=dataset, generator=generator), batches))
+    all_images_nn_list = list(map(lambda n: model.sample(batch_size=n, dataset=dataset, generator=rand_generator), batches))
 
     all_images_list, all_nn_list = zip(*all_images_nn_list)
     all_images      = torch.cat(all_images_list, dim=0)

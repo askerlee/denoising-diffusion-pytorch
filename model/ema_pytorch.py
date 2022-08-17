@@ -60,8 +60,9 @@ class EMA(nn.Module):
         if not exists(self.ema_model):
             try:
                 self.ema_model = copy.deepcopy(model)
-            except:
-                print('Your model was not copyable. Please make sure you are not using any LazyLinear')
+            except Exception as e:
+                print('Your model was not copyable')
+                print(e)
                 exit()
 
         self.ema_model.requires_grad_(False)
