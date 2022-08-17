@@ -1,6 +1,6 @@
 from model import Unet, GaussianDiffusion, \
                   WeightedDistributedSampler, \
-                  EMA, cycle, DistributedDataParallelPassthrough, \
+                  cycle, DistributedDataParallelPassthrough, \
                   sample_images, AverageMeters, print0, reduce_tensor, create_training_dataset_sampler
 import argparse
 import torch
@@ -14,6 +14,7 @@ from tqdm.auto import tqdm
 import random
 import numpy as np
 import re
+from ema_pytorch import EMA
 
 # trainer class
 class Trainer(object):
@@ -24,7 +25,6 @@ class Trainer(object):
         data_sampler,
         local_rank = -1,
         world_size = 1,
-        ema_decay = 0.995,
         adam_betas = (0.9, 0.99),
         train_batch_size = 32,
         train_lr = 1e-4,
@@ -34,8 +34,9 @@ class Trainer(object):
         grad_clip = -1,
         amp = True,
         num_workers = 3,
-        step_start_ema = 2000,
+        ema_update_after_step = 2000,
         ema_update_every = 10,
+        ema_decay = 0.995,
         save_and_sample_every = 1000,
         sample_dir = 'samples',
         cp_dir = 'checkpoints',
@@ -44,11 +45,9 @@ class Trainer(object):
         super().__init__()
         # model: GaussianDiffusion instance.
         self.model = diffusion_model
-        self.ema = EMA(ema_decay)
-        self.ema_model = copy.deepcopy(self.model)
-        self.ema_update_every = ema_update_every
+        self.ema = EMA(diffusion_model, beta = ema_decay, update_every = ema_update_every, 
+                       update_after_step=ema_update_after_step)
 
-        self.step_start_ema = step_start_ema
         self.save_and_sample_every = save_and_sample_every
 
         self.batch_size = train_batch_size
@@ -88,12 +87,6 @@ class Trainer(object):
     def reset_parameters(self):
         self.ema_model.load_state_dict(self.model.state_dict())
 
-    def step_ema(self):
-        if self.step < self.step_start_ema:
-            self.reset_parameters()
-            return
-        self.ema.update_model_average(self.ema_model, self.model)
-
     def save(self, milestone):
         if self.local_rank > 0:
             return
@@ -101,7 +94,7 @@ class Trainer(object):
         data = {
             'step':     self.step,
             'model':    self.model.state_dict(),
-            'ema':      self.ema_model.state_dict(),
+            'ema':      self.ema.state_dict(),
             'scaler':   self.scaler.state_dict()
         }
         torch.save(data, f'{self.cp_dir}/model-{milestone:03}.pt')
@@ -117,10 +110,10 @@ class Trainer(object):
         data = torch.load(f'{self.cp_dir}/model-{milestone:03}.pt')
         if self.local_rank < 0:
             self.model.load_state_dict(convert(data['model']))
-            self.ema_model.load_state_dict(convert(data['ema']))
+            self.ema.load_state_dict(convert(data['ema']))
         else:
             self.model.load_state_dict(data['model'])
-            self.ema_model.load_state_dict(data['ema'])
+            self.ema.load_state_dict(data['ema'])
 
         self.step = data['step']
         self.scaler.load_state_dict(data['scaler'])
@@ -180,20 +173,20 @@ class Trainer(object):
 
                 self.model.denoise_fn.post_update()
                 
-                if self.step % self.ema_update_every == 0:
-                    self.step_ema()
+                if is_master:
+                    self.ema.update()
 
-                if self.step != 0 and self.step % self.save_and_sample_every == 0:
-                    self.loss_meter.disp_reset()
-                    # ema_model: GaussianDiffusion
-                    self.ema_model.eval()
+                    if self.step != 0 and self.step % self.save_and_sample_every == 0:
+                        self.loss_meter.disp_reset()
+                        # ema: GaussianDiffusion
+                        self.ema.eval()
 
-                    milestone = self.step // self.save_and_sample_every
-                    img_save_path = f'{self.sample_dir}/{milestone:03}-sample.png'
-                    nn_save_path  = f'{self.sample_dir}/{milestone:03}-nn.png'
-                    self.save(milestone)
-                    # self.dataset is provided for nearest neighbor imgae search.
-                    sample_images(self.ema_model, 36, 36, self.dataset, img_save_path, nn_save_path)               
+                        milestone = self.step // self.save_and_sample_every
+                        img_save_path = f'{self.sample_dir}/{milestone:03}-sample.png'
+                        nn_save_path  = f'{self.sample_dir}/{milestone:03}-nn.png'
+                        self.save(milestone)
+                        # self.dataset is provided for nearest neighbor imgae search.
+                        sample_images(self.ema_model, 36, 36, self.dataset, img_save_path, nn_save_path)               
 
                 self.step += 1
                 pbar.update(1)

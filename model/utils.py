@@ -441,6 +441,7 @@ def create_training_dataset_sampler(args, save_sample_images_and_exit=False):
 
     return dataset, sampler
 
+# Obsolete. Cannot handle torch.Generator() object. Use lucidrains's ema_pytorch instead.
 class EMA():
     def __init__(self, beta):
         super().__init__()
