@@ -1,5 +1,4 @@
 from model import Unet, GaussianDiffusion, EMA, \
-                  WeightedDistributedSampler, \
                   cycle, DistributedDataParallelPassthrough, \
                   sample_images, AverageMeters, print0, reduce_tensor, create_training_dataset_sampler
 import argparse

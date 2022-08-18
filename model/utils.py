@@ -16,10 +16,12 @@ import imgaug.augmenters as iaa
 from torchvision.transforms import ColorJitter, ToTensor, ToPILImage, Resize
 import glob
 from itertools import chain
+from operator import itemgetter
+
+local_rank = int(os.environ.get('LOCAL_RANK', 0))
 
 # Only print on GPU0. Avoid duplicate messages.
 def print0(*print_args, **kwargs):
-    local_rank = int(os.environ.get('LOCAL_RANK', 0))
     if local_rank == 0:
         print(*print_args, **kwargs)
 
@@ -380,34 +382,84 @@ class ClsByFolderDataset(BaseDataset):
             print0("{} images in '{}'. First: '{}'".format(len(img_list), folder_name, img_list[0]))
             cls += 1
 
-# oversampling_ratio: pseudo-dataset with *oversampling_ratio* times the number of images in the original dataset.
-# This is to make sure that the sampled frequency of each image is indeed roughly proportional to its weight.
-class WeightedOversamplingWrapper(data.Dataset):
-    def __init__(self, dataset, oversampling_ratio=5):
-        self.dataset = dataset
-        self.num_samples = len(dataset) * oversampling_ratio
-        self.resample()
+        assert len(self.sample_weights) == len(self.paths)
 
-    def __len__(self):
-        return self.num_samples
+class DatasetFromSampler(data.Dataset):
+    """Dataset to create indexes from `Sampler`.
+    Args:
+        sampler: PyTorch sampler
+    """
 
-    def __getitem__(self, index):
-        return self.dataset[self.sample_indices[index]]
+    def __init__(self, sampler):
+        """Initialisation for DatasetFromSampler."""
+        self.sampler = sampler
+        self.sampler_list = None
 
-    def resample(self):
-        self.sample_indices = list(iter(data.WeightedRandomSampler(self.dataset.sample_weights, self.num_samples, replacement=True)))
+    def __getitem__(self, index: int):
+        """Gets element of the dataset.
+        Args:
+            index: index of the element in the dataset
+        Returns:
+            Single element by index
+        """
+        if self.sampler_list is None:
+            self.sampler_list = list(self.sampler)
+        return self.sampler_list[index]
 
-# Class-balanced sampling wrapper for DistributedSampler.
-class WeightedDistributedSampler(DistributedSampler):
-    def __init__(self, dataset, num_replicas=None, rank=None, shuffle=True):
-        self.dataset = WeightedOversamplingWrapper(dataset)
-        super().__init__(self.dataset, num_replicas, rank, shuffle)
+    def __len__(self) -> int:
+        """
+        Returns:
+            int: length of the dataset
+        """
+        return len(self.sampler)
 
-    # set_epoch() is called by cycle() after an epoch finishes.
-    # dataset.resample() is called to reset the sampled indices, so that potential bias is reduced.
-    def set_epoch(self, epoch):
-        self.epoch = epoch
-        self.dataset.resample()
+class DistributedSamplerWrapper(DistributedSampler):
+    """
+    Wrapper over `Sampler` for distributed training.
+    Allows you to use any sampler in distributed mode.
+    It is especially useful in conjunction with
+    `torch.nn.parallel.DistributedDataParallel`. In such case, each
+    process can pass a DistributedSamplerWrapper instance as a DataLoader
+    sampler, and load a subset of subsampled data of the original dataset
+    that is exclusive to it.
+    .. note::
+        Sampler is assumed to be of constant size.
+    """
+
+    def __init__(
+        self,
+        sampler,
+        num_replicas = None,
+        rank = None,
+        shuffle: bool = True,
+    ):
+        """
+        Args:
+            sampler: Sampler used for subsampling
+            num_replicas (int, optional): Number of processes participating in
+                distributed training
+            rank (int, optional): Rank of the current process
+                within ``num_replicas``
+            shuffle (bool, optional): If true (default),
+                sampler will shuffle the indices
+        """
+        super(DistributedSamplerWrapper, self).__init__(
+            DatasetFromSampler(sampler),
+            num_replicas=num_replicas,
+            rank=rank,
+            shuffle=shuffle,
+        )
+        self.sampler = sampler
+
+    def __iter__(self):
+        """Iterate over sampler.
+        Returns:
+            python iterator
+        """
+        self.dataset = DatasetFromSampler(self.sampler)
+        indexes_of_indexes = super().__iter__()
+        subsampler_indexes = self.dataset
+        return iter(itemgetter(*indexes_of_indexes)(subsampler_indexes))
 
 def create_training_dataset_sampler(args, save_sample_images_and_exit=False):
     if args.ds == 'imagenet':
@@ -431,8 +483,13 @@ def create_training_dataset_sampler(args, save_sample_images_and_exit=False):
 
     if not args.debug:
         if args.on_multi_domain:
-            # Use WeightedDistributedSampler to do class-balanced sampling.
-            sampler = WeightedDistributedSampler(dataset)
+            # Use WeightedRandomSampler to do class-balanced sampling.
+            # oversampling_ratio: pseudo-dataset with *oversampling_ratio* times the number of images in the original dataset.
+            # This is to make sure that the sampled frequency of each image is indeed roughly proportional to its weight.
+            oversampling_ratio = 5
+            weighted_sampler = data.WeightedRandomSampler(dataset.sample_weights, len(dataset) * oversampling_ratio, 
+                                                          replacement=True)
+            sampler = DistributedSamplerWrapper(weighted_sampler)
         else:
             # Use a normal DistributedSampler, as class-balancing is not needed.
             sampler = DistributedSampler(dataset)
