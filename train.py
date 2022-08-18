@@ -87,8 +87,9 @@ class Trainer(object):
 
         # Sampling uses a random generator independent from training, 
         # to facililtate comparison of different methods in terms of generation quality.
-        self.sample_rand_generator = torch.Generator()
-        self.sample_rand_generator.manual_seed(sample_seed)
+        if self.is_master:
+            self.sample_rand_generator = torch.Generator(device='cuda')
+            self.sample_rand_generator.manual_seed(sample_seed)
 
     def save(self, milestone):
         if self.local_rank > 0:
