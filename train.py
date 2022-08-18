@@ -206,6 +206,7 @@ parser.add_argument('--bs', dest='batch_size', type=int, default=32, help="Batch
 parser.add_argument('--clip', dest='grad_clip', type=float, default=-1, help="Gradient clipping")
 parser.add_argument('--cp', type=str, dest='cp_path', default=None, help="The path of a model checkpoint")
 parser.add_argument('--sample', dest='sample_only', action='store_true', help='Do sampling using a trained model')
+parser.add_argument('--size', dest='image_size', type=int, default=128, help="Input and output image size")
 parser.add_argument('--nogeoaug', dest='do_geo_aug', action='store_false', 
                     help='Do not do geometric augmentation on training images')
 parser.add_argument('--nocoloraug', dest='do_color_aug', action='store_false', 
@@ -347,7 +348,7 @@ unet = Unet(
 
 diffusion = GaussianDiffusion(
     unet,                               # denoise_fn
-    image_size = 128,                   # Input image is resized to image_size before augmentation.
+    image_size = args.image_size,       # Input image is resized to image_size before augmentation.
     num_timesteps = args.num_timesteps, # number of maximum diffusion steps
     alpha_beta_schedule = args.alpha_beta_schedule, # alpha/beta schedule
     loss_type = args.loss_type,         # L1, L2, lap (Laplacian)

@@ -384,6 +384,7 @@ class ClsByFolderDataset(BaseDataset):
 
         assert len(self.sample_weights) == len(self.paths)
 
+# https://github.com/catalyst-team/catalyst/blob/master/catalyst/data/dataset.py
 class DatasetFromSampler(data.Dataset):
     """Dataset to create indexes from `Sampler`.
     Args:
@@ -413,6 +414,7 @@ class DatasetFromSampler(data.Dataset):
         """
         return len(self.sampler)
 
+# https://github.com/catalyst-team/catalyst/blob/master/catalyst/data/sampler.py
 class DistributedSamplerWrapper(DistributedSampler):
     """
     Wrapper over `Sampler` for distributed training.
@@ -463,17 +465,21 @@ class DistributedSamplerWrapper(DistributedSampler):
 
 def create_training_dataset_sampler(args, save_sample_images_and_exit=False):
     if args.ds == 'imagenet':
-        dataset = Imagenet(args.ds, image_size=128, split='train', 
+        dataset = Imagenet(args.ds, image_size=args.image_size, split='train', 
                            do_geo_aug=args.do_geo_aug, do_color_aug=args.do_color_aug)
 
     elif args.ds == '102flowers':
+        # do_color_aug will make flower color unnatural.
         dataset = TxtLabeledDataset(args.ds, label_file='102flowers/102flower_labels.txt', 
-                                image_size=128, do_geo_aug=args.do_geo_aug, do_color_aug=False)
+                                    image_size=args.image_size, do_geo_aug=args.do_geo_aug, do_color_aug=False)
     elif args.on_multi_domain:
-        dataset = ClsByFolderDataset(args.ds, image_size=128, do_geo_aug=args.do_geo_aug, do_color_aug=False)
+        # do_geo_aug is not recommended, as many scenarios the images are no longer natural after rotation.
+        # Even if do_geo_aug=False, random cropping and resizing is still applied.
+        dataset = ClsByFolderDataset(args.ds, image_size=args.image_size, 
+                                     do_geo_aug=args.do_geo_aug, do_color_aug=False)
         args.cls_guide_type = 'single'
     else:
-        dataset = SingletonDataset(args.ds, image_size=128, do_geo_aug=args.do_geo_aug, 
+        dataset = SingletonDataset(args.ds, image_size=args.image_size, do_geo_aug=args.do_geo_aug, 
                                 do_color_aug=args.do_color_aug)
 
     if save_sample_images_and_exit:
