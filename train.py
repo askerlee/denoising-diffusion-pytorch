@@ -188,7 +188,7 @@ class Trainer(object):
                         nn_save_path  = f'{self.sample_dir}/{milestone:03}-nn.png'
                         self.save(milestone)
                         # self.dataset is provided for nearest neighbor imgae search.
-                        sample_images(self.ema, self.sample_rand_generator, 36, 36, 
+                        sample_images(self.ema.ema_model, self.sample_rand_generator, 36, 36, 
                                       self.dataset, img_save_path, nn_save_path)               
 
                 self.step += 1
