@@ -170,6 +170,8 @@ class ResnetBlock(nn.Module):
                 breakpoint()
             scale_shift = time_emb.chunk(2, dim = 1)
 
+        # h has been affine-transformed by scale_shift in block1, 
+        # and scale_shift is derived from time_emb.
         h = self.block1(x, scale_shift = scale_shift)
         h = self.block2(h)
         return h + self.res_conv(x)
@@ -281,9 +283,9 @@ class Unet(nn.Module):
         learned_sinusoidal_cond = False,
         learned_sinusoidal_dim = 16,        
         featnet_type = 'vit_tiny_patch16_224',
-        cls_guide_featnet_type = 'repvgg_b0',
+        cls_sem_featnet_type = 'vit_tiny_patch16_224',
         finetune_tea_feat_ext = False,
-        cls_guide_shares_tea_feat_ext = False,
+        cls_sem_shares_tea_feat_ext = False,
         distillation_type = 'none',
     ):
         super().__init__()
@@ -377,7 +379,7 @@ class Unet(nn.Module):
 
         self.featnet_type      = featnet_type
         self.finetune_tea_feat_ext      = finetune_tea_feat_ext
-        self.cls_guide_shares_tea_feat_ext   = cls_guide_shares_tea_feat_ext
+        self.cls_sem_shares_tea_feat_ext   = cls_sem_shares_tea_feat_ext
         self.distillation_type = distillation_type
 
         if self.featnet_type != 'none' and self.featnet_type != 'mini':
@@ -396,14 +398,14 @@ class Unet(nn.Module):
             self.dist_feat_ext_tea = None
             self.dist_feat_ext_stu = None
 
-        self.cls_guide_featnet_type = cls_guide_featnet_type
-        if self.cls_guide_featnet_type != 'none':
-            if self.cls_guide_shares_tea_feat_ext:      # default False.
-                self.cls_guide_feat_ext = copy.deepcopy(self.dist_feat_ext_tea) 
+        self.cls_sem_featnet_type = cls_sem_featnet_type
+        if self.cls_sem_featnet_type != 'none':
+            if self.cls_sem_shares_tea_feat_ext:      # default False.
+                self.cls_sem_feat_ext = copy.deepcopy(self.dist_feat_ext_tea) 
             else:
-                self.cls_guide_feat_ext = timm.create_model(self.cls_guide_featnet_type, pretrained=True)
+                self.cls_sem_feat_ext = timm.create_model(self.cls_sem_featnet_type, pretrained=True)
         else:
-            self.cls_guide_feat_ext = None
+            self.cls_sem_feat_ext = None
         
         # distillation_type: 'none' or 'tfrac'. 
         if self.distillation_type == 'none':
@@ -455,21 +457,21 @@ class Unet(nn.Module):
                 ]))
 
     def pre_update(self):
-        if not self.cls_guide_shares_tea_feat_ext:
-            # Back up the weight of cls_guide_feat_ext.
-            self.cls_guide_feat_ext_backup = copy.deepcopy(self.cls_guide_feat_ext)
-        # Otherwise post_update() will restore cls_guide_feat_ext from dist_feat_ext_tea.
-        # No need to back up cls_guide_feat_ext.
+        if not self.cls_sem_shares_tea_feat_ext:
+            # Back up the weight of cls_sem_feat_ext.
+            self.cls_sem_feat_ext_backup = copy.deepcopy(self.cls_sem_feat_ext)
+        # Otherwise post_update() will restore cls_sem_feat_ext from dist_feat_ext_tea.
+        # No need to back up cls_sem_feat_ext.
 
     def post_update(self):
-        if self.cls_guide_shares_tea_feat_ext:
-            # Restore cls_guide_feat_ext from teacher feature extractor 
+        if self.cls_sem_shares_tea_feat_ext:
+            # Restore cls_sem_feat_ext from teacher feature extractor 
             # to keep it from being updated by the consistency loss.
-            self.cls_guide_feat_ext = copy.deepcopy(self.dist_feat_ext_tea)
+            self.cls_sem_feat_ext = copy.deepcopy(self.dist_feat_ext_tea)
         else:
-            # Restore cls_guide_feat_ext from the backup.
-            self.cls_guide_feat_ext = self.cls_guide_feat_ext_backup
-            self.cls_guide_feat_ext_backup = None
+            # Restore cls_sem_feat_ext from the backup.
+            self.cls_sem_feat_ext = self.cls_sem_feat_ext_backup
+            self.cls_sem_feat_ext_backup = None
 
     def forward(self, x, time, classes_or_embed=None, x_self_cond = None, img_tea=None):
         if self.self_condition:
@@ -673,9 +675,9 @@ class GaussianDiffusion(nn.Module):
         distillation_type = 'none',
         distill_t_frac = 0.,
         dataset = None,
-        cls_guide_use_head_feat = False,
-        cls_guide_type = 'none',
-        cls_guide_loss_weight = 0.01,
+        denoise1_cls_sem_loss_use_head_feat = False,
+        denoise1_cls_sem_loss_type = 'none',
+        cls_sem_loss_weight = 0.01,
         align_tea_stu_feat_weight = 0,
         sample_dir = 'samples',      
         ddim_sampling_eta = 1.,
@@ -706,13 +708,11 @@ class GaussianDiffusion(nn.Module):
         else:
             self.cls_embed_type = 'tea_stu'
 
-        # interpolation loss reduces performance.
-        self.interp_loss_weight     = 0
         # Use backbone head features for consistency losses, i.e., with the geometric dimensions collapsed.
-        # such as class-guidance loss and interpolation loss (interpolation doesn't work well, though).
-        self.cls_guide_use_head_feat  = cls_guide_use_head_feat
-        self.cls_guide_type             = cls_guide_type
-        self.cls_guide_loss_weight      = cls_guide_loss_weight
+        # such as class semantics loss (single or interpolation loss, interpolation doesn't work well, though).
+        self.denoise1_cls_sem_loss_use_head_feat    = denoise1_cls_sem_loss_use_head_feat
+        self.denoise1_cls_sem_loss_type = denoise1_cls_sem_loss_type
+        self.cls_sem_loss_weight        = cls_sem_loss_weight
         self.align_tea_stu_feat_weight  = align_tea_stu_feat_weight
         self.sample_dir = sample_dir
         self.debug = debug
@@ -985,7 +985,7 @@ class GaussianDiffusion(nn.Module):
 
         return img
 
-    def calc_cls_interp_loss(self, img_gt, classes, min_interp_w = 0., min_before_weight=True,
+    def calc_denoise1_cls_interp_loss(self, img_gt, classes, min_interp_w = 0., min_before_weight=True,
                              noise_scheme='larger_t', min_t_percentile=0.8):
         assert self.cls_embed_type != 'none' and exists(classes)
 
@@ -1008,8 +1008,8 @@ class GaussianDiffusion(nn.Module):
             img_gt          = torch.cat([img_gt1, img_gt2], dim=0)
             classes         = classes1.repeat(2)
 
-        feat_gt = extract_pre_feat(self.featnet_type, self.denoise_fn.cls_guide_feat_ext, img_gt, ref_shape=None, 
-                                   has_grad=False, use_head_feat=self.cls_guide_use_head_feat)        
+        feat_gt = extract_pre_feat(self.featnet_type, self.denoise_fn.cls_sem_feat_ext, img_gt, ref_shape=None, 
+                                   has_grad=False, use_head_feat=self.denoise1_cls_sem_loss_use_head_feat)        
         feat_gt1, feat_gt2  = feat_gt[:b2], feat_gt[b2:]
         w = torch.rand((b2, ), device=img_gt.device)
         # Normalize w into [min_interp_w, 1-min_interp_w], i.e., [0.2, 0.8].
@@ -1022,6 +1022,7 @@ class GaussianDiffusion(nn.Module):
         noise = fast_randn_like(img_gt)
         if noise_scheme == 'pure_noise':
             t2 = torch.full((b2, ), self.num_timesteps - 1, device=device, dtype=torch.long)
+            # as we expect the input to be pure noise, no need to interpolate two sub-batches of noisy images
             img_noisy_interp = noise[:b2]
 
         elif noise_scheme == 'larger_t':
@@ -1030,6 +1031,7 @@ class GaussianDiffusion(nn.Module):
             t  = t2.repeat(2)
             img_noisy = self.q_sample(x_start=img_gt, t=t, noise=noise, distill_t_frac=-1)
             img_noisy1, img_noisy2 = img_noisy[:b2], img_noisy[b2:]
+            # interpolate two sub-batches of noisy images
             img_noisy_interp = w_4d * img_noisy1 + (1 - w_4d) * img_noisy2
 
         elif noise_scheme == 'almost_pure_noise':
@@ -1042,6 +1044,7 @@ class GaussianDiffusion(nn.Module):
             noise_weight    = torch.sqrt(1 - alphas_cumprod)
             img_noisy       = x_start_weight * img_gt + noise_weight * noise
             img_noisy1, img_noisy2 = img_noisy[:b2], img_noisy[b2:]
+            # interpolate two sub-batches of noisy images
             img_noisy_interp = w_4d * img_noisy1 + (1 - w_4d) * img_noisy2
 
         # Embeddings of the first and second halves are the same. 
@@ -1049,7 +1052,7 @@ class GaussianDiffusion(nn.Module):
         if within_same_class:
             cls_embed_interp = self.denoise_fn.cls_embedding(classes1)
         else:
-            # Interpolate class embeddings of two classes.
+            # Interpolate class embeddings of the two sub-batches of class embeddings.
             cls_embed = self.denoise_fn.cls_embedding(classes)
             cls_embed1, cls_embed2 = cls_embed[:b2], cls_embed[b2:]
             cls_embed_interp = w_2d * cls_embed1 + (1 - w_2d) * cls_embed2
@@ -1067,23 +1070,17 @@ class GaussianDiffusion(nn.Module):
         if self.iter_count % 1000 == 0:
             cycle_idx = self.iter_count // 1000
             if self.local_rank <= 0:
-                sample_dir = f'{self.sample_dir}/interp'
-                os.makedirs(sample_dir, exist_ok=True)
-                img_gtaug_save_path  = f'{sample_dir}/{cycle_idx:03}-{self.local_rank}-gtaug.png'
-                unnorm_save_image(img_gt,   img_gtaug_save_path,  nrow = 8)
-
-                #print("GT images for interpolation are saved to", img_gt_save_path)
-                img_noisy_save_path = f'{sample_dir}/{cycle_idx:03}-{self.local_rank}-noise.png'
-                unnorm_save_image(img_noisy_interp, img_noisy_save_path, nrow = 8)
-                #print("Noisy images for interpolation are saved to", img_noisy_save_path)
-                img_pred_save_path  = f'{sample_dir}/{cycle_idx:03}-{self.local_rank}-recon.png'
-                unnorm_save_image(img_stu_pred, img_pred_save_path, nrow = 8)
-                #print("Predicted images are saved to", img_pred_save_path)
+                os.makedirs(self.sample_dir, exist_ok=True)
+                # img_gt contains the two sub-batches. As nrow is half of the batch size,
+                # img_gt is split into two rows, which is desired.
+                img_denoise1 = torch.stack([img_gt, img_noisy_interp, img_stu_pred], dim=0)
+                img_denoise1_save_path  = f'{self.sample_dir}/{cycle_idx:03}-denoise1.png'
+                unnorm_save_image(img_denoise1,   img_denoise1_save_path,  nrow = b2)
 
         # feat_interp is the intermediate features of the denoised images. 
         # So it has to stay in the computation graph, and has_grad=True.
-        feat_interp = extract_pre_feat(self.featnet_type, self.denoise_fn.cls_guide_feat_ext, img_stu_pred, ref_shape=None, 
-                                       has_grad=True, use_head_feat=self.cls_guide_use_head_feat)
+        feat_interp = extract_pre_feat(self.featnet_type, self.denoise_fn.cls_sem_feat_ext, img_stu_pred, ref_shape=None, 
+                                       has_grad=True, use_head_feat=self.denoise1_cls_sem_loss_use_head_feat)
 
         loss_interp1 = self.consist_loss_fn(feat_interp, feat_gt1, reduction='none')
         loss_interp2 = self.consist_loss_fn(feat_interp, feat_gt2, reduction='none')
@@ -1109,8 +1106,8 @@ class GaussianDiffusion(nn.Module):
         return loss_interp
 
     # cls_single_loss only considers the semantic consistency of the denoised images 
-    # with the ground truth images, taking the class embeddings as the guide.
-    def calc_cls_single_loss(self, img_gt, classes, noise_scheme='larger_t', min_t_percentile=0.8):
+    # with the ground truth images, taking the class embeddings to guide the semantics of generated images.
+    def calc_denoise1_cls_single_loss(self, img_gt, classes, noise_scheme='larger_t', min_t_percentile=0.8):
         assert self.cls_embed_type != 'none' and exists(classes)
 
         b, device = img_gt.shape[0], img_gt.device
@@ -1119,8 +1116,8 @@ class GaussianDiffusion(nn.Module):
         img_gt2 = img_gt[:b2]
         classes2 = classes[:b2]
 
-        feat_gt = extract_pre_feat(self.featnet_type, self.denoise_fn.cls_guide_feat_ext, img_gt2, ref_shape=None, 
-                                   has_grad=False, use_head_feat=self.cls_guide_use_head_feat)        
+        feat_gt = extract_pre_feat(self.featnet_type, self.denoise_fn.cls_sem_feat_ext, img_gt2, ref_shape=None, 
+                                   has_grad=False, use_head_feat=self.denoise1_cls_sem_loss_use_head_feat)        
         noise   = fast_randn_like(img_gt2)
 
         if noise_scheme == 'pure_noise':
@@ -1143,11 +1140,10 @@ class GaussianDiffusion(nn.Module):
             img_noisy       = x_start_weight * img_gt2 + noise_weight * noise
 
         cls_embed = self.denoise_fn.cls_embedding(classes2)
-        # cls_embed = cls_embed.view(b2, *((1,) * (len(img_noisy.shape) - 2)), -1)
 
         # Set img_tea to None, so that teacher module won't be executed and trained, 
         # to reduce unnecessary compute.
-        # Shouldn't train the teacher using class guidance, as the teacher is specialized 
+        # Shouldn't train the teacher using class semantics loss, as the teacher is specialized 
         # to handle easier (less noisy) images.
         model_output_dict = self.denoise_fn(img_noisy, t, classes_or_embed=cls_embed, img_tea=None)
         img_stu_pred = model_output_dict['preds_stu'][-1]
@@ -1160,29 +1156,18 @@ class GaussianDiffusion(nn.Module):
         if self.iter_count % 1000 == 0:
             cycle_idx = self.iter_count // 1000
             if self.local_rank <= 0:
-                sample_dir = f'{self.sample_dir}/single'
-                os.makedirs(sample_dir, exist_ok=True)
-
-                img_gtaug_save_path  = f'{sample_dir}/{cycle_idx:03}-{self.local_rank}-gtaug.png'
-                unnorm_save_image(img_gt2,   img_gtaug_save_path,  nrow = 8)
-                #img_gtorig_save_path = f'{sample_dir}/{cycle_idx:03}-{self.local_rank}-orig.png'
-                #unnorm_save_image(img_orig, img_gtorig_save_path, nrow = 8)
-
-                #print("GT images for single-image class guidance are saved to", img_gt_save_path)
-                img_noisy_save_path = f'{sample_dir}/{cycle_idx:03}-{self.local_rank}-noise.png'
-                unnorm_save_image(img_noisy, img_noisy_save_path, nrow = 8)
-                #print("Noisy images for single-image class guidance are saved to", img_noisy_save_path)
-                img_pred_save_path  = f'{sample_dir}/{cycle_idx:03}-{self.local_rank}-recon.png'
-                unnorm_save_image(img_stu_pred, img_pred_save_path, nrow = 8)
-                #print("Predicted images are saved to", img_pred_save_path)
+                os.makedirs(self.sample_dir, exist_ok=True)
+                img_denoise1 = torch.stack([img_gt2, img_noisy, img_stu_pred], dim=0)
+                img_denoise1_save_path  = f'{self.sample_dir}/{cycle_idx:03}-denoise1.png'
+                unnorm_save_image(img_denoise1,   img_denoise1_save_path,  nrow = b2)
 
         # feat_stu is the intermediate features of the denoised images. 
         # So it has to stay in the computation graph, and has_grad=True.
-        feat_stu = extract_pre_feat(self.featnet_type, self.denoise_fn.cls_guide_feat_ext, img_stu_pred, ref_shape=None, 
-                                    has_grad=True, use_head_feat=self.cls_guide_use_head_feat)
+        feat_stu = extract_pre_feat(self.featnet_type, self.denoise_fn.cls_sem_feat_ext, img_stu_pred, ref_shape=None, 
+                                    has_grad=True, use_head_feat=self.denoise1_cls_sem_loss_use_head_feat)
 
-        loss_cls_guide = self.consist_loss_fn(feat_stu, feat_gt)
-        return loss_cls_guide
+        loss_cls_sem = self.consist_loss_fn(feat_stu, feat_gt)
+        return loss_cls_sem
 
     # inject random noise into x_start. sqrt_one_minus_alphas_cumprod_t is the std of the noise.
     def q_sample(self, x_start, t, noise=None, distill_t_frac=-1):
@@ -1324,22 +1309,22 @@ class GaussianDiffusion(nn.Module):
                                                  loss_tea / len(preds_stu), \
                                                  loss_align_tea_stu / len(preds_stu)
 
-        if self.cls_guide_type != 'none':
-            if self.cls_guide_type == 'single':
-                loss_cls_guide = self.calc_cls_single_loss(x_start, classes)
-            elif self.cls_guide_type == 'interp':
-                loss_cls_guide = self.calc_cls_interp_loss(x_start, classes)
+        if self.denoise1_cls_sem_loss_type != 'none':
+            if self.denoise1_cls_sem_loss_type == 'single':
+                loss_cls_sem = self.calc_denoise1_cls_single_loss(x_start, classes)
+            elif self.denoise1_cls_sem_loss_type == 'interp':
+                loss_cls_sem = self.calc_denoise1_cls_interp_loss(x_start, classes)
         else:
-            loss_cls_guide = torch.zeros_like(loss_stu)
+            loss_cls_sem = torch.zeros_like(loss_stu)
 
         loss = loss_stu + loss_tea + \
                 self.align_tea_stu_feat_weight * loss_align_tea_stu + \
-                self.cls_guide_loss_weight * loss_cls_guide
+                self.cls_sem_loss_weight * loss_cls_sem
 
         # Capping loss at 1 might helps early iterations when losses are unstable (occasionally very large).
         if loss > 1:
             loss = loss / loss.item()
-        return { 'loss': loss, 'loss_stu': loss_stu, 'loss_tea': loss_tea, 'loss_cls_guide': loss_cls_guide }
+        return { 'loss': loss, 'loss_stu': loss_stu, 'loss_tea': loss_tea, 'loss_cls_sem': loss_cls_sem }
 
     def forward(self, img, img_orig, classes, iter_count, *args, **kwargs):
         self.iter_count = iter_count

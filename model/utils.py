@@ -478,7 +478,8 @@ def create_training_dataset_sampler(args, save_sample_images_and_exit=False):
         # Even if do_geo_aug=False, random cropping and resizing is still applied.
         dataset = ClsByFolderDataset(args.ds, image_size=args.image_size, 
                                      do_geo_aug=args.do_geo_aug, do_color_aug=False)
-        args.cls_guide_type = 'single'
+        # Do not do interpolation between classes on multi-domain training.
+        args.denoise1_cls_sem_loss_type = 'single'
     else:
         dataset = SingletonDataset(args.ds, image_size=args.image_size, do_geo_aug=args.do_geo_aug, 
                                 do_color_aug=args.do_color_aug)

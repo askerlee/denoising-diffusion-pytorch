@@ -150,19 +150,19 @@ class Trainer(object):
                         loss_tea = loss_dict['loss_tea'].mean()
                         loss_tea = reduce_tensor(loss_tea, self.world_size)
                         self.loss_meter.update('loss_tea', loss_tea.item())
-                    if args.cls_guide_loss_weight > 0:
-                        loss_cls_guide = loss_dict['loss_cls_guide'].mean()
-                        loss_cls_guide = reduce_tensor(loss_cls_guide, self.world_size)
-                        self.loss_meter.update('loss_cls_guide', loss_cls_guide.item())
+                    if args.denoise1_cls_sem_loss_weight > 0:
+                        loss_cls_sem = loss_dict['loss_cls_sem'].mean()
+                        loss_cls_sem = reduce_tensor(loss_cls_sem, self.world_size)
+                        self.loss_meter.update('loss_cls_sem', loss_cls_sem.item())
 
                 avg_loss_stu = self.loss_meter.avg['disp']['loss_stu']
                 desc_items = [ f's {loss_stu.item():.3f}/{avg_loss_stu:.3f}' ]
                 if args.distillation_type != 'none':
                     avg_loss_tea = self.loss_meter.avg['disp']['loss_tea']
                     desc_items.append( f't {loss_tea.item():.3f}/{avg_loss_tea:.3f}' )
-                if args.cls_guide_loss_weight > 0:
-                    avg_loss_cls_guide = self.loss_meter.avg['disp']['loss_cls_guide']
-                    desc_items.append( f'c {loss_cls_guide.item():.3f}/{avg_loss_cls_guide:.3f}' )
+                if args.denoise1_cls_sem_loss_weight > 0:
+                    avg_loss_cls_sem = self.loss_meter.avg['disp']['loss_cls_sem']
+                    desc_items.append( f'c {loss_cls_sem.item():.3f}/{avg_loss_cls_sem:.3f}' )
 
                 desc = ', '.join(desc_items)
                 pbar.set_description(desc)
@@ -259,19 +259,20 @@ parser.add_argument('--tuneteacher', dest='finetune_tea_feat_ext', default=False
 parser.add_argument('--alignfeat', dest='align_tea_stu_feat_weight', default=0.001, type=float, 
                     help='Align the features of the feature extractors of the teacher and the student. '
                     'Default: 0.0, meaning no alignment.')
-parser.add_argument('--clsguidefeatnet', dest='cls_guide_featnet_type', 
+parser.add_argument('--clssemfeatnet', dest='cls_sem_featnet_type', 
                     choices=[ 'none', 'resnet34', 'resnet18', 'repvgg_b0', 
                               'mobilenetv2_120d', 'vit_base_patch8_224', 'vit_tiny_patch16_224' ], 
                     default='vit_tiny_patch16_224', 
-                    help='Type of the feature network for the class guidance loss.')
-parser.add_argument('--clsguide', dest='cls_guide_type', choices=['none', 'single', 'interp'], default='single', 
-                    help='The type of class guidance: none, single (one class only), '
-                         'or interp (interpolation between two classes to enforce class embedding linearity)')
-parser.add_argument('--wclsguide', dest='cls_guide_loss_weight', default=0.001, type=float, 
-                    help='Guide denoising random images with class embedding. ')
-parser.add_argument('--clsheadfeat', dest='cls_guide_use_head_feat', action='store_true', 
-                    help='Use the collapsed feature maps when computing consistency losses (e.g., class guidance loss).')
-parser.add_argument('--clssharetea', dest='cls_guide_shares_tea_feat_ext', action='store_true', 
+                    help='Type of the feature network for the class semantics loss.')
+parser.add_argument('--clssemlosstype', dest='denoise1_cls_sem_loss_type', choices=['none', 'single', 'interp'], default='none', 
+                    help='The type of class semantics loss: none, single (one class only), '
+                         'or interp (interpolation between two classes to enforce class embedding linearity). '
+                         'Even if the loss is none, class embeddings are still learned as long as num_classes >= 1.')
+parser.add_argument('--wclssem', dest='denoise1_cls_sem_loss_weight', default=0.001, type=float, 
+                    help='Weight of the class semantics loss that regularizes generation from noisy images with class embeddings. ')
+parser.add_argument('--clsheadfeat', dest='denoise1_cls_sem_loss_use_head_feat', action='store_true', 
+                    help='Use the collapsed feature maps when computing consistency losses (e.g., class semantics loss).')
+parser.add_argument('--clssharetea', dest='cls_sem_shares_tea_feat_ext', action='store_true', 
                     help='Use the teacher feature extractor weights for the consistency loss.')
 parser.add_argument('--selfcond', dest='self_condition', action='store_true', 
                     help='Use self-conditioning for lower FID.')
@@ -293,16 +294,16 @@ if args.distillation_type == 'tfrac' and args.featnet_type == 'none':
     print0("Distillation type is 'tfrac', but no feature network is specified. ")
     exit(0)
 
-if args.cls_guide_loss_weight > 0:
+if args.denoise1_cls_sem_loss_weight > 0:
     if args.featnet_type == 'none':
-        print0("Class guidance is enabled, but feature network is not specified.")
+        print0("Class semantics loss is enabled, but feature network is not specified.")
         exit(0)
     if args.featnet_type == 'repvgg_b0':
-        print0("Class guidance is enabled, but the feature network is 'repvgg_b0'. This will lead to bad performance.")
+        print0("Class semantics loss is enabled, but the feature network is 'repvgg_b0'. This will lead to bad performance.")
         print0("Recommended: '--featnet vit_tiny_patch16_224'.")
         exit(0)
 
-if args.cls_guide_shares_tea_feat_ext:
+if args.cls_sem_shares_tea_feat_ext:
     if args.distillation_type == 'none':
         print0("Consistency loss intends to share teacher feature extractor, but distillation is disabled "
             "(no teacher feature extractor is to be shared).")
@@ -311,7 +312,7 @@ if args.cls_guide_shares_tea_feat_ext:
         print0("Consistency loss intends to share teacher feature extractor, but teacher feature extractor is not "
                "fine-tuned (Then no point to share it).")
         exit(0)
-    if args.cls_guide_featnet_type != args.featnet_type:
+    if args.cls_sem_featnet_type != args.featnet_type:
         print0("Consistency loss intends to share teacher feature extractor, but the feature network is not the same "
                "as the teacher feature extractor.")
         exit(0)
@@ -342,7 +343,7 @@ unet = Unet(
     # if do distillation and featnet_type=='resnet34' or another model name, 
     # use image features extracted with a pretrained model to train the teacher model.
     featnet_type = args.featnet_type,
-    cls_guide_featnet_type = args.cls_guide_featnet_type,
+    cls_sem_featnet_type = args.cls_sem_featnet_type,
     distillation_type = args.distillation_type,
     # if finetune_tea_feat_ext=False,
     # do not finetune the pretrained image feature extractor of the teacher model.
@@ -365,9 +366,9 @@ diffusion = GaussianDiffusion(
     distillation_type = args.distillation_type,
     distill_t_frac = args.distill_t_frac,
     dataset = dataset,
-    cls_guide_use_head_feat = args.cls_guide_use_head_feat,
-    cls_guide_type = args.cls_guide_type,
-    cls_guide_loss_weight = args.cls_guide_loss_weight,
+    denoise1_cls_sem_loss_use_head_feat = args.denoise1_cls_sem_loss_use_head_feat,
+    denoise1_cls_sem_loss_type = args.denoise1_cls_sem_loss_type,
+    denoise1_cls_sem_loss_weight = args.denoise1_cls_sem_loss_weight,
     align_tea_stu_feat_weight = args.align_tea_stu_feat_weight,
     sample_dir = args.sample_dir,
     debug = args.debug,
