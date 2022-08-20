@@ -1073,7 +1073,7 @@ class GaussianDiffusion(nn.Module):
                 os.makedirs(self.sample_dir, exist_ok=True)
                 # img_gt contains the two sub-batches. As nrow is half of the batch size,
                 # img_gt is split into two rows, which is desired.
-                img_denoise1 = torch.stack([img_gt, img_noisy_interp, img_stu_pred], dim=0)
+                img_denoise1 = torch.cat([img_gt, img_noisy_interp, img_stu_pred], dim=0)
                 img_denoise1_save_path  = f'{self.sample_dir}/{cycle_idx:03}-denoise1.png'
                 unnorm_save_image(img_denoise1,   img_denoise1_save_path,  nrow = b2)
 
@@ -1157,7 +1157,7 @@ class GaussianDiffusion(nn.Module):
             cycle_idx = self.iter_count // 1000
             if self.local_rank <= 0:
                 os.makedirs(self.sample_dir, exist_ok=True)
-                img_denoise1 = torch.stack([img_gt2, img_noisy, img_stu_pred], dim=0)
+                img_denoise1 = torch.cat([img_gt2, img_noisy, img_stu_pred], dim=0)
                 img_denoise1_save_path  = f'{self.sample_dir}/{cycle_idx:03}-denoise1.png'
                 unnorm_save_image(img_denoise1,   img_denoise1_save_path,  nrow = b2)
 
