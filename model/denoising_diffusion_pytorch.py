@@ -865,7 +865,7 @@ class GaussianDiffusion(nn.Module):
         return pred_img, x_start     
 
     # Sampled image pixels are between [-1, 1]. Need to unnormalize_to_zero_to_one() before output.
-    def p_sample_loop(self, shape, noise=None, classes_or_embed=None, 
+    def p_sample_loop(self, shape, noise=None, classes_or_embed=None, num_timesteps=None,
                       clip_denoised=True, generator=None):
         batch, device = shape[0], self.betas.device
 
@@ -875,6 +875,7 @@ class GaussianDiffusion(nn.Module):
             img = noise
 
         x_start = None
+        num_timesteps = default(num_timesteps, self.num_timesteps)
 
         if self.cls_embed_type == 'none':
             classes_or_embed = None
@@ -882,7 +883,7 @@ class GaussianDiffusion(nn.Module):
             # classes_or_embed is initialized as random classes.
             classes_or_embed = torch.randint(0, self.num_classes, (batch,), device=device, generator=generator)
 
-        for t in tqdm(reversed(range(0, self.num_timesteps)), desc = 'sampling loop time step', disable=not self.is_master):
+        for t in tqdm(reversed(range(0, num_timesteps)), desc = 'sampling loop time step', disable=not self.is_master):
             self_cond = x_start if self.self_condition else None
             img, x_start = self.p_sample(img, t, classes_or_embed, self_cond,
                                          clip_denoised=clip_denoised)
@@ -891,9 +892,15 @@ class GaussianDiffusion(nn.Module):
         return img, classes_or_embed
 
     @torch.no_grad()
-    def ddim_sample(self, shape, noise=None, classes_or_embed=None, clip_denoised=True, generator=None):
-        batch, device, total_timesteps, sampling_timesteps, eta, objective = shape[0], self.betas.device, self.num_timesteps, self.sampling_timesteps, self.ddim_sampling_eta, self.objective
-
+    def ddim_sample(self, shape, noise=None, classes_or_embed=None, 
+                    num_timesteps=None, sampling_timesteps=None,
+                    clip_denoised=True, generator=None):
+        batch, device, eta, objective = shape[0], self.betas.device, self.ddim_sampling_eta, self.objective
+        total_timesteps     = default(num_timesteps, self.num_timesteps)
+        sampling_timesteps  = default(sampling_timesteps, self.sampling_timesteps)
+        # total_timesteps could be smaller than self.num_timesteps. 
+        # So ensure that sampling_timesteps is no bigger than total_timesteps.
+        sampling_timesteps  = min(sampling_timesteps, total_timesteps)
         times = torch.linspace(0., total_timesteps, steps = sampling_timesteps + 2)[:-1]
         times = list(reversed(times.int().tolist()))
         time_pairs = list(zip(times[:-1], times[1:]))
@@ -955,15 +962,23 @@ class GaussianDiffusion(nn.Module):
             return None
         return img, nn_img
 
-    def translate(self, img_orig, new_class, t_frac=0.8, generator=None):
+    def translate(self, img_orig, target_class, t_frac=0.8, generator=None):
         batch_size = img_orig.shape[0]
         image_size, channels = self.image_size, self.channels
-        sample_fn = self.p_sample_loop if not self.is_ddim_sampling else self.ddim_sample
         
         t = int(self.num_timesteps * t_frac)
-        img_new, classes = sample_fn((batch_size, channels, image_size, image_size), generator=generator)
-        # Find nearest neighbors in dataset.
+        noise = fast_randn(img_orig.shape, device=img_orig.device, generator=generator)
+        # Add noise to img_orig, then denoise it.
+        # noise is generated with the provided generator, for reproducibility.
+        # distill_t_frac is used to generae a less noisy image, which is different from t_frac. 
+        # So it's not used here.
+        img_noisy = self.q_sample(x_start=img_orig, t=t, noise=noise, distill_t_frac=-1)
+        classes   = torch.full((batch_size,), target_class, device=img_orig.device, dtype=torch.long)
 
+        sample_fn = self.p_sample_loop if not self.is_ddim_sampling else self.ddim_sample
+        # img_new has been unnormalized to zero to one.
+        img_new, classes = sample_fn((batch_size, channels, image_size, image_size), noise=img_noisy,
+                                     classes_or_embed=classes, num_timesteps=t, generator=generator)
         return img_new
 
     def noisy_interpolate(self, x1, x2, t_batch, w = 0.5):

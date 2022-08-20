@@ -539,11 +539,10 @@ def sample_images(model, rand_generator, num_images, batch_size, dataset, img_sa
     else:
         print0("")
 
-def translate_images(model, load_dir, batch_size, new_class, save_dir, t_frac=0.8, generator=None):
-    dataset = SingletonDataset(load_dir, image_size=model.image_size, do_geo_aug=False, do_color_aug=False)
-    dataloader = data.DataLoader(dataset, batch_size = batch_size, sampler = None, 
-                                 shuffle = False, pin_memory = False, 
-                                 drop_last = False, num_workers = 2)
+def translate_images(model, dataset, batch_size, target_class, save_dir, t_frac=0.8, generator=None):
+    dataloader  = data.DataLoader(dataset, batch_size = batch_size, sampler = None, 
+                                  shuffle = False, pin_memory = False, 
+                                  drop_last = False, num_workers = 2)
 
     image_iter = iter(dataloader)
     save_count = 0
@@ -553,7 +552,7 @@ def translate_images(model, load_dir, batch_size, new_class, save_dir, t_frac=0.
         img_orig   = data_dict['img_orig'].cuda()
         img_names  = data_dict['filename']
 
-        img_new    = model.translate(img_orig, new_class, t_frac, generator)
+        img_new    = model.translate(img_orig, target_class, t_frac, generator)
         img_new_np = (img_new.detach().cpu().numpy() * 255.0).astype(np.uint8)
         img_new_np = img_new_np.transpose(0, 2, 3, 1)
         img_new_np = img_new_np[:, :, :, ::-1]  # RGB to BGR for cv2.imwrite().

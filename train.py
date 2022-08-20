@@ -1,6 +1,7 @@
 from model import Unet, GaussianDiffusion, EMA, \
                   cycle, DistributedDataParallelPassthrough, \
-                  sample_images, AverageMeters, print0, reduce_tensor, create_training_dataset_sampler
+                  AverageMeters, print0, reduce_tensor, create_training_dataset_sampler, \
+                  sample_images, translate_images
 import argparse
 import torch
 from torch.cuda.amp import autocast, GradScaler
@@ -208,6 +209,14 @@ parser.add_argument('--bs', dest='batch_size', type=int, default=32, help="Batch
 parser.add_argument('--clip', dest='grad_clip', type=float, default=-1, help="Gradient clipping")
 parser.add_argument('--cp', type=str, dest='cp_path', default=None, help="The path of a model checkpoint")
 parser.add_argument('--sample', dest='sample_only', action='store_true', help='Do sampling using a trained model')
+
+parser.add_argument('--trans', dest='translate_only', action='store_true', 
+                    help='Do domain translation using a trained model')
+parser.add_argument('--targetclass', dest='trans_target_class', type=int, default=-1, 
+                    help='Target class of domain translation')
+parser.add_argument('--transtfrac', dest='trans_t_frac', type=float, default=0.8,
+                    help='Number of denoising steps used by domain translation, specified as a fraction of the max steps')
+
 parser.add_argument('--size', dest='image_size', type=int, default=128, help="Input and output image size")
 parser.add_argument('--nogeoaug', dest='do_geo_aug', action='store_false', 
                     help='Do not do geometric augmentation on training images')
@@ -226,7 +235,7 @@ parser.add_argument('--saveimg', dest='sample_dir', type=str, default='samples',
 parser.add_argument('--savecp',  dest='cp_dir', type=str, default='checkpoints', 
                     help="The path to save checkpoints")
 
-parser.add_argument('--times', dest='num_timesteps', type=int, default=1000, 
+parser.add_argument('--steps', dest='num_timesteps', type=int, default=1000, 
                     help="Number of maximum diffusion steps")
 parser.add_argument('--mem', dest='memory_size', type=int, default=2048, 
                     help="Number of memory cells in each attention layer")
@@ -248,7 +257,7 @@ parser.add_argument('--featnet', dest='featnet_type',
                     choices=[ 'none', 'mini', 'resnet34', 'resnet18', 'repvgg_b0', 
                               'mobilenetv2_120d', 'vit_base_patch8_224', 'vit_tiny_patch16_224' ], 
                     default='vit_tiny_patch16_224', 
-                    help='Type of the feature network. Used by the distillation and loss.')
+                    help='Type of the feature network. Used by feature distillation.')
 
 parser.add_argument('--distill', dest='distillation_type', choices=['none', 'tfrac'], default='tfrac', 
                     help='Distillation type')
@@ -265,7 +274,7 @@ parser.add_argument('--clssemfeatnet', dest='cls_sem_featnet_type',
                               'mobilenetv2_120d', 'vit_base_patch8_224', 'vit_tiny_patch16_224' ], 
                     default='vit_tiny_patch16_224', 
                     help='Type of the feature network for the class semantics loss.')
-parser.add_argument('--clssemlosstype', dest='denoise1_cls_sem_loss_type', choices=['none', 'single', 'interp'], default='none', 
+parser.add_argument('--clssemlosstype', dest='denoise1_cls_sem_loss_type', choices=['none', 'single', 'interp'], default='single', 
                     help='The type of class semantics loss: none, single (one class only), '
                          'or interp (interpolation between two classes to enforce class embedding linearity). '
                          'Even if the loss is none, class embeddings are still learned as long as num_classes >= 1.')
@@ -335,7 +344,7 @@ print0(f"world size: {args.world_size}, batch size per GPU: {args.batch_size}, s
 
 timestamp = datetime.now().strftime("%m%d%H%M")
 args.sample_dir = os.path.join(args.sample_dir, timestamp)
-print0(f"Saving samples to {args.sample_dir}")
+print0(f"Saving samples to '{args.sample_dir}'")
 
 unet = Unet(
     dim = 64,
@@ -356,27 +365,31 @@ unet = Unet(
 )
 
 diffusion = GaussianDiffusion(
-    unet,                               # denoise_fn
-    image_size = args.image_size,       # Input image is resized to image_size before augmentation.
-    num_timesteps = args.num_timesteps, # number of maximum diffusion steps
+    unet,                                           # denoise_fn
+    image_size = args.image_size,                   # Input image is resized to image_size before augmentation.
+    num_timesteps = args.num_timesteps,             # number of maximum diffusion steps
     alpha_beta_schedule = args.alpha_beta_schedule, # alpha/beta schedule
-    powa_exponent = args.powa_exponent, # exponent of the power-alpha schedule.
-    loss_type = args.loss_type,         # L1, L2, lap (Laplacian)
-    consist_loss_type = args.consist_loss_type,  # L1 (default), cosine.
-    objective = args.objective_type,    # objective type, pred_noise or pred_x0
+    powa_exponent = args.powa_exponent,             # exponent of the power-alpha schedule.
+    loss_type = args.loss_type,                     # L1, L2, lap (Laplacian)
+    consist_loss_type = args.consist_loss_type,     # L1 (default), cosine.
+    objective = args.objective_type,                # objective type, pred_noise or pred_x0
     # if do distillation and featnet_type=='mini', use a miniature of original images as privileged information to train the teacher model.
     # if do distillation and featnet_type=='resnet34' or another model name, 
     # use image features extracted with a pretrained model to train the teacher model.
-    featnet_type = args.featnet_type,
-    distillation_type = args.distillation_type,
-    distill_t_frac = args.distill_t_frac,
-    dataset = dataset,
+    featnet_type = args.featnet_type,               # type of feature extractor for feature distillation.
+    distillation_type = args.distillation_type,     # type of feature distillation. 'none' or 'tfrac'
+    distill_t_frac = args.distill_t_frac,           # fraction of t steps to use for feature distillation.
+    dataset = dataset,                              # dataset
+    # use the head features of the feature extractor to compute the class semantics loss.
     denoise1_cls_sem_loss_use_head_feat = args.denoise1_cls_sem_loss_use_head_feat,
+    # 'none', 'single', or 'interp'. If 'single', use the single-class semantics loss.
+    # If 'interp', use the interpolated semantics loss between two classes.
     denoise1_cls_sem_loss_type = args.denoise1_cls_sem_loss_type,
     denoise1_cls_sem_loss_weight = args.denoise1_cls_sem_loss_weight,
+    # weight of the teacher/student feature consistency loss.
     align_tea_stu_feat_weight = args.align_tea_stu_feat_weight,
-    sample_dir = args.sample_dir,
-    debug = args.debug,
+    sample_dir = args.sample_dir,                   # directory to save samples.
+    debug = args.debug,                             # debug mode or not.
 )
 
 diffusion.cuda()
@@ -395,31 +408,41 @@ if args.sample_only:
     milestone = int(cp_trunk)
     img_save_path = f'{args.sample_dir}/{milestone:03}-sample.png'
     nn_save_path  = f'{args.sample_dir}/{milestone:03}-nn.png'
-    # dataset is provided for nearest neighbor imgae search.
     sample_rand_generator = torch.Generator(device='cuda')
     sample_rand_generator.manual_seed(args.sample_seed)
 
+    # dataset is provided for nearest neighbor image search.
     sample_images(diffusion, sample_rand_generator, 36, 36, dataset, img_save_path, nn_save_path)
+    exit()
+
+if args.translate_only:
+    assert args.cp_path is not None, "Please specify a checkpoint path to load for domain translation"
+    args.sample_dir = os.path.join(args.sample_dir, f'-{args.trans_t_frac:.1f}')
+    
+    trans_rand_generator = torch.Generator(device='cuda')
+    trans_rand_generator.manual_seed(args.sample_seed)
+    translate_images(diffusion, dataset, args.batch_size, args.trans_target_class, args.sample_dir, 
+                     args.trans_t_frac, trans_rand_generator)
     exit()
 
 trainer = Trainer(
     diffusion,
     dataset,                            # Dataset instance.
-    data_sampler,
+    data_sampler,                       # Dataset sampler instance.
     local_rank = args.local_rank,       # Local rank of the process.
     world_size = args.world_size,       # Total number of processes.
     train_batch_size = args.batch_size, # default: 32
-    train_lr = args.lr,                 # default: 1e-4
-    train_num_steps = 700000,           # total training steps
+    train_lr = args.lr,                 # default: 4e-4
+    train_num_steps = 700000,           # total training steps.
     gradient_accumulate_every = 2,      # gradient accumulation steps
     grad_clip = args.grad_clip,         # default: -1, disabled.
     ema_decay = 0.995,                  # exponential moving average decay
     amp = args.amp,                     # turn on mixed precision. Default: True
-    num_workers = args.num_workers,
-    save_and_sample_every = args.save_sample_interval,
-    sample_dir  = args.sample_dir,
-    sample_seed = args.sample_seed,
-    cp_dir      = args.cp_dir,
+    num_workers = args.num_workers,     # number of workers for data loading. Default: 3
+    save_and_sample_every = args.save_sample_interval,  # save checkpoint and sample every this many steps. Default: 1000
+    sample_dir  = args.sample_dir,      # directory to save samples.
+    sample_seed = args.sample_seed,     # random seed for sampling, to enable comparison across different runs.
+    cp_dir      = args.cp_dir,          # directory to save model checkpoints.
 )
 
 trainer.train()
