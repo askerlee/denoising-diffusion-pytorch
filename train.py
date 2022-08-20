@@ -427,7 +427,8 @@ if args.sample_only:
 if args.translate_only:
     assert args.cp_path is not None, "Please specify a checkpoint path to load for domain translation"
     args.sample_dir = os.path.join(args.sample_dir, f'-{args.trans_t_frac:.1f}')
-
+    os.makedirs(args.sample_dir, exist_ok=True)
+    print0(f"Saving translated images to {args.sample_dir}")
     trans_rand_generator = torch.Generator(device='cuda')
     trans_rand_generator.manual_seed(args.sample_seed)
     translate_images(diffusion, dataset, args.batch_size, args.trans_num_batches, 
