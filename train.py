@@ -221,6 +221,8 @@ parser.add_argument('--targetclass', dest='trans_target_class', type=int, defaul
                     help='Target class of domain translation')
 parser.add_argument('--transtfrac', dest='trans_t_frac', type=float, default=0.8,
                     help='Number of denoising steps used by domain translation, specified as a fraction of the max steps')
+parser.add_argument('--transbatches', dest='trans_num_batches', type=int, default=-1,
+                    help='Number of batches of images to translate (default: -1, all batches)')
 
 parser.add_argument('--size', dest='image_size', type=int, default=128, help="Input and output image size")
 parser.add_argument('--nogeoaug', dest='do_geo_aug', action='store_false', 
@@ -407,7 +409,7 @@ if args.cp_path is not None:
     ema.load_state_dict(torch.load(args.cp_path)['ema'])
     diffusion = ema.ema_model
     print0("Loaded checkpoint from {}".format(args.cp_path))
-    
+
 if args.sample_only:
     assert args.cp_path is not None, "Please specify a checkpoint path to load for sampling"
     cp_trunk = os.path.basename(args.cp_path).split('.')[0]
@@ -428,7 +430,8 @@ if args.translate_only:
 
     trans_rand_generator = torch.Generator(device='cuda')
     trans_rand_generator.manual_seed(args.sample_seed)
-    translate_images(diffusion, dataset, args.batch_size, args.trans_source_class, args.trans_target_class, 
+    translate_images(diffusion, dataset, args.batch_size, args.trans_num_batches, 
+                     args.trans_source_class, args.trans_target_class, 
                      args.sample_dir, args.trans_t_frac, trans_rand_generator)
     exit()
 
