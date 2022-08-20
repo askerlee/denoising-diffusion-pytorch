@@ -679,6 +679,7 @@ class GaussianDiffusion(nn.Module):
         denoise1_cls_sem_loss_use_head_feat = False,
         denoise1_cls_sem_loss_type = 'none',
         denoise1_cls_sem_loss_weight = 0.01,
+        denoise1_cls_sem_min_t_percentile = 0.8,
         align_tea_stu_feat_weight = 0,
         sample_dir = 'samples',      
         ddim_sampling_eta = 1.,
@@ -1328,9 +1329,9 @@ class GaussianDiffusion(nn.Module):
 
         if self.denoise1_cls_sem_loss_type != 'none':
             if self.denoise1_cls_sem_loss_type == 'single':
-                loss_cls_sem = self.calc_denoise1_cls_single_loss(x_start, classes)
+                loss_cls_sem = self.calc_denoise1_cls_single_loss(x_start, classes, min_t_percentile=self.denoise1_cls_sem_min_t_percentile)
             elif self.denoise1_cls_sem_loss_type == 'interp':
-                loss_cls_sem = self.calc_denoise1_cls_interp_loss(x_start, classes)
+                loss_cls_sem = self.calc_denoise1_cls_interp_loss(x_start, classes, min_t_percentile=self.denoise1_cls_sem_min_t_percentile)
         else:
             loss_cls_sem = torch.zeros_like(loss_stu)
 

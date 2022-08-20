@@ -276,20 +276,22 @@ parser.add_argument('--tuneteacher', dest='finetune_tea_feat_ext', default=False
 parser.add_argument('--alignfeat', dest='align_tea_stu_feat_weight', default=0.001, type=float, 
                     help='Align the features of the feature extractors of the teacher and the student. '
                     'Default: 0.0, meaning no alignment.')
-parser.add_argument('--clssemfeatnet', dest='cls_sem_featnet_type', 
+parser.add_argument('--clssem-featnet', dest='cls_sem_featnet_type', 
                     choices=[ 'none', 'resnet34', 'resnet18', 'repvgg_b0', 
                               'mobilenetv2_120d', 'vit_base_patch8_224', 'vit_tiny_patch16_224' ], 
                     default='vit_tiny_patch16_224', 
                     help='Type of the feature network for the class semantics loss.')
-parser.add_argument('--clssemlosstype', dest='denoise1_cls_sem_loss_type', choices=['none', 'single', 'interp'], default='single', 
+parser.add_argument('--clssem-losstype', dest='denoise1_cls_sem_loss_type', choices=['none', 'single', 'interp'], default='single', 
                     help='The type of class semantics loss: none, single (one class only), '
                          'or interp (interpolation between two classes to enforce class embedding linearity). '
                          'Even if the loss is none, class embeddings are still learned as long as num_classes >= 1.')
 parser.add_argument('--wclssem', dest='denoise1_cls_sem_loss_weight', default=0.001, type=float, 
                     help='Weight of the class semantics loss that regularizes generation from noisy images with class embeddings. ')
-parser.add_argument('--clsheadfeat', dest='denoise1_cls_sem_loss_use_head_feat', action='store_true', 
+parser.add_argument('--clssem-mintfrac', dest='denoise1_cls_sem_min_t_percentile', default=0.8, type=float,
+                    help='Minimal noise amount, specified as a fraction of max time steps, to be added to images for class semantics loss.')
+parser.add_argument('--clssem-use-headfeat', dest='denoise1_cls_sem_loss_use_head_feat', action='store_true', 
                     help='Use the collapsed feature maps when computing consistency losses (e.g., class semantics loss).')
-parser.add_argument('--clssharetea', dest='cls_sem_shares_tea_feat_ext', action='store_true', 
+parser.add_argument('--clssem-shareteafeat', dest='cls_sem_shares_tea_feat_ext', action='store_true', 
                     help='Use the teacher feature extractor weights for the consistency loss.')
 parser.add_argument('--selfcond', dest='self_condition', action='store_true', 
                     help='Use self-conditioning for lower FID.')
@@ -393,6 +395,7 @@ diffusion = GaussianDiffusion(
     # If 'interp', use the interpolated semantics loss between two classes.
     denoise1_cls_sem_loss_type = args.denoise1_cls_sem_loss_type,
     denoise1_cls_sem_loss_weight = args.denoise1_cls_sem_loss_weight,
+    denoise1_cls_sem_min_t_percentile = args.denoise1_cls_sem_min_t_percentile,
     # weight of the teacher/student feature consistency loss.
     align_tea_stu_feat_weight = args.align_tea_stu_feat_weight,
     sample_dir = args.sample_dir,                   # directory to save samples.
