@@ -677,7 +677,7 @@ class GaussianDiffusion(nn.Module):
         dataset = None,
         denoise1_cls_sem_loss_use_head_feat = False,
         denoise1_cls_sem_loss_type = 'none',
-        cls_sem_loss_weight = 0.01,
+        denoise1_cls_sem_loss_weight = 0.01,
         align_tea_stu_feat_weight = 0,
         sample_dir = 'samples',      
         ddim_sampling_eta = 1.,
@@ -712,7 +712,7 @@ class GaussianDiffusion(nn.Module):
         # such as class semantics loss (single or interpolation loss, interpolation doesn't work well, though).
         self.denoise1_cls_sem_loss_use_head_feat    = denoise1_cls_sem_loss_use_head_feat
         self.denoise1_cls_sem_loss_type = denoise1_cls_sem_loss_type
-        self.cls_sem_loss_weight        = cls_sem_loss_weight
+        self.denoise1_cls_sem_loss_weight           = denoise1_cls_sem_loss_weight
         self.align_tea_stu_feat_weight  = align_tea_stu_feat_weight
         self.sample_dir = sample_dir
         self.debug = debug
@@ -1319,7 +1319,7 @@ class GaussianDiffusion(nn.Module):
 
         loss = loss_stu + loss_tea + \
                 self.align_tea_stu_feat_weight * loss_align_tea_stu + \
-                self.cls_sem_loss_weight * loss_cls_sem
+                self.denoise1_cls_sem_loss_weight * loss_cls_sem
 
         # Capping loss at 1 might helps early iterations when losses are unstable (occasionally very large).
         if loss > 1:
