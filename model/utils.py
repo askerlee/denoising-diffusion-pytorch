@@ -365,7 +365,6 @@ class ClsByFolderDataset(BaseDataset):
         self.index2cls   = []
         start_idx = 0
 
-        print0("{} images in '{}' loaded.".format(len(self.paths), root))
         # Weight of each sample for WeightedRandomSampler, to do class-balanced sampling.
         self.sample_weights = []
 
@@ -380,9 +379,10 @@ class ClsByFolderDataset(BaseDataset):
             self.sample_weights += [1./len(img_list)] * len(img_list)
             start_idx = end_idx
             folder_name = folder_names[cls]
-            print0("{} images in '{}'. First: '{}'".format(len(img_list), folder_name, img_list[0]))
+            print0("{} images in {}:'{}'. First: '{}'".format(len(img_list), cls, folder_name, img_list[0]))
             cls += 1
 
+        print0("{} images in '{}' loaded, {} classes.".format(len(self.paths), root, self.get_num_classes()))
         assert len(self.sample_weights) == len(self.paths)
 
 # https://github.com/catalyst-team/catalyst/blob/master/catalyst/data/dataset.py
@@ -479,7 +479,9 @@ def create_training_dataset_sampler(args, save_sample_images_and_exit=False):
         dataset = ClsByFolderDataset(args.ds, image_size=args.image_size, 
                                      do_geo_aug=args.do_geo_aug, do_color_aug=False)
         # Do not do interpolation between classes on multi-domain training.
-        args.denoise1_cls_sem_loss_type = 'single'
+        # If denoise1_cls_sem_loss_type is 'none', then keep it as 'none'.
+        if args.denoise1_cls_sem_loss_type == 'interpolation':
+            args.denoise1_cls_sem_loss_type = 'single'
     else:
         dataset = SingletonDataset(args.ds, image_size=args.image_size, do_geo_aug=args.do_geo_aug, 
                                 do_color_aug=args.do_color_aug)
