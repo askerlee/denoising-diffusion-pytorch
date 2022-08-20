@@ -644,6 +644,7 @@ def linear_beta_schedule(num_timesteps):
     beta_end = scale * 0.02
     return torch.linspace(beta_start, beta_end, num_timesteps, dtype = torch.float64)
 
+# Mix power_alpha_schedule and linear_beta_schedule.
 def powa_linb_schedule(num_timesteps, powa_exponent=3.):
     powa_betas = power_alpha_schedule(num_timesteps // 2, powa_exponent)
     linb_betas = linear_beta_schedule(num_timesteps // 2)

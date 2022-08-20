@@ -13,6 +13,7 @@ from tqdm.auto import tqdm
 import random
 import numpy as np
 import re
+from datetime import datetime
 
 # trainer class
 class Trainer(object):
@@ -331,6 +332,10 @@ dataset, data_sampler = create_training_dataset_sampler(args)
 num_classes = dataset.get_num_classes()
 
 print0(f"world size: {args.world_size}, batch size per GPU: {args.batch_size}, seed: {args.seed}")
+
+timestamp = datetime.now().strftime("%m%d%H%M")
+args.sample_dir = os.path.join((args.sample_dir, timestamp))
+print0(f"Saving samples to {args.sample_dir}")
 
 unet = Unet(
     dim = 64,
