@@ -715,6 +715,7 @@ class GaussianDiffusion(nn.Module):
         self.denoise1_cls_sem_loss_use_head_feat    = denoise1_cls_sem_loss_use_head_feat
         self.denoise1_cls_sem_loss_type = denoise1_cls_sem_loss_type
         self.denoise1_cls_sem_loss_weight           = denoise1_cls_sem_loss_weight
+        self.denoise1_cls_sem_min_t_percentile      = denoise1_cls_sem_min_t_percentile
         self.align_tea_stu_feat_weight  = align_tea_stu_feat_weight
         self.sample_dir = sample_dir
         self.debug = debug
