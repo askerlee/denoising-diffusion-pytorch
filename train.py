@@ -82,8 +82,11 @@ class Trainer(object):
 
         self.sample_dir = sample_dir
         self.cp_dir = cp_dir
-        os.makedirs(sample_dir, exist_ok=True)
-        os.makedirs(cp_dir, exist_ok=True)
+
+        if self.is_master:
+            os.makedirs(sample_dir, exist_ok=True)
+            os.makedirs(cp_dir, exist_ok=True)
+            print(f"Saving samples to '{sample_dir}'")
 
         self.loss_meter = AverageMeters()
 
@@ -344,7 +347,6 @@ print0(f"world size: {args.world_size}, batch size per GPU: {args.batch_size}, s
 
 timestamp = datetime.now().strftime("%m%d%H%M")
 args.sample_dir = os.path.join(args.sample_dir, timestamp)
-print0(f"Saving samples to '{args.sample_dir}'")
 
 unet = Unet(
     dim = 64,
@@ -418,7 +420,7 @@ if args.sample_only:
 if args.translate_only:
     assert args.cp_path is not None, "Please specify a checkpoint path to load for domain translation"
     args.sample_dir = os.path.join(args.sample_dir, f'-{args.trans_t_frac:.1f}')
-    
+
     trans_rand_generator = torch.Generator(device='cuda')
     trans_rand_generator.manual_seed(args.sample_seed)
     translate_images(diffusion, dataset, args.batch_size, args.trans_target_class, args.sample_dir, 
