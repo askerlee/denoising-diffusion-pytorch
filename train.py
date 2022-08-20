@@ -403,8 +403,10 @@ diffusion = DistributedDataParallelPassthrough(diffusion, device_ids=[local_rank
                                                find_unused_parameters=True)
 
 if args.cp_path is not None:
-    diffusion.load_state_dict(torch.load(args.cp_path)['ema'])
-
+    ema = EMA(diffusion)
+    ema.load_state_dict(torch.load(args.cp_path)['ema'])
+    diffusion = ema.ema_model
+    
 if args.sample_only:
     assert args.cp_path is not None, "Please specify a checkpoint path to load for sampling"
     cp_trunk = os.path.basename(args.cp_path).split('.')[0]
