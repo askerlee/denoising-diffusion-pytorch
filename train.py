@@ -228,8 +228,10 @@ parser.add_argument('--times', dest='num_timesteps', type=int, default=1000,
                     help="Number of maximum diffusion steps")
 parser.add_argument('--mem', dest='memory_size', type=int, default=2048, 
                     help="Number of memory cells in each attention layer")
-parser.add_argument('--sched', dest='alpha_beta_schedule', type=str, choices=['cosb', 'lina', 'linb'], 
-                    default='lina', help="Type of alpha/beta schedule")
+parser.add_argument('--sched', dest='alpha_beta_schedule', type=str, choices=['cosb', 'powa', 'linb'], 
+                    default='linb', help="Type of alpha/beta schedule")
+parser.add_argument('--powa', dest='powa_exponent', type=float, default=3.,
+                    help="Exponent of power-alpha schedule")
 
 parser.add_argument('--losstype', dest='loss_type', type=str, choices=['l1', 'l2'], default='l1', 
                     help="Type of image denoising loss")
@@ -351,6 +353,7 @@ diffusion = GaussianDiffusion(
     image_size = args.image_size,       # Input image is resized to image_size before augmentation.
     num_timesteps = args.num_timesteps, # number of maximum diffusion steps
     alpha_beta_schedule = args.alpha_beta_schedule, # alpha/beta schedule
+    powa_exponent = args.powa_exponent, # exponent of the power-alpha schedule.
     loss_type = args.loss_type,         # L1, L2, lap (Laplacian)
     consist_loss_type = args.consist_loss_type,  # L1 (default), cosine.
     objective = args.objective_type,    # objective type, pred_noise or pred_x0

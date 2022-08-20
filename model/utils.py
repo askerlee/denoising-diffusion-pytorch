@@ -8,6 +8,7 @@ import torch.distributed as dist
 
 from pathlib import Path
 from PIL import Image
+import cv2
 import os
 import numpy as np
 import timm
@@ -172,7 +173,7 @@ class BaseDataset(data.Dataset):
         cls = self.index2cls[index]
         # print(img_aug.shape, path)
         # For small datasets such as pokemon, use index as the image classes.
-        return { 'img': img_aug, 'img_orig': img_orig, 'cls': cls }
+        return { 'img': img_aug, 'img_orig': img_orig, 'cls': cls, 'filename': os.path.basename(path) }
 
     def get_num_classes(self):
         return len(self.cls2indices)
@@ -551,28 +552,31 @@ def sample_images(model, rand_generator, num_images, batch_size, dataset, img_sa
     else:
         print0("")
 
+def translate_images(model, load_dir, batch_size, new_class, save_dir, t_frac=0.8, generator=None):
+    dataset = SingletonDataset(load_dir, image_size=model.image_size, do_geo_aug=False, do_color_aug=False)
+    dataloader = data.DataLoader(dataset, batch_size = batch_size, sampler = None, 
+                                 shuffle = False, pin_memory = False, 
+                                 drop_last = False, num_workers = 2)
 
-def translate_images(model, num_images, batch_size, dataset, img_save_path, nn_save_path):
-    # Split num_images into batches of size batch_size, with possibly some leftover.
-    batches = num_to_groups(num_images, batch_size)
+    image_iter = iter(dataloader)
+    save_count = 0
+    
+    for i in range(len(dataloader)):
+        data_dict  = next(image_iter)
+        img_orig   = data_dict['img_orig'].cuda()
+        img_names  = data_dict['filename']
 
-    # In all_images_list, each element is a batch of images.
-    # In all_nn_list, if dataset is provided, each element is a batch of nearest neighbor images. 
-    # Otherwise, all_nn_list is a list of None.
-    all_images_nn_list = list(map(lambda n: model.sample(batch_size=n, dataset=dataset), batches))
+        img_new    = model.translate(img_orig, new_class, t_frac, generator)
+        img_new_np = (img_new.detach().cpu().numpy() * 255.0).astype(np.uint8)
+        img_new_np = img_new_np.transpose(0, 2, 3, 1)
+        img_new_np = img_new_np[:, :, :, ::-1]  # RGB to BGR for cv2.imwrite().
 
-    all_images_list, all_nn_list = zip(*all_images_nn_list)
-    all_images      = torch.cat(all_images_list, dim=0)
-    utils.save_image(all_images,    img_save_path, nrow = 6)
-    print0(f"Sampled {img_save_path}. ", end="")
+        for img_name, img_np in zip(img_names, img_new_np):
+            save_path = os.path.join(save_dir, img_name)
+            cv2.imwrite(save_path, img_np)
+            save_count += 1
 
-    # If all_nn_list[0] is not None, then all elements in all_nn_list are not None.
-    if exists(all_nn_list[0]):
-        all_nn_images = torch.cat(all_nn_list, dim=0)
-        utils.save_image(all_nn_images, nn_save_path, nrow = 6)
-        print0(f"Nearest neighbors {nn_save_path}.")
-    else:
-        print0("")
+    print(f"{save_count} images translated and saved to {save_dir}.")
 
 # For CNN models, just forward to forward_features().
 # For ViTs, patch the original timm code to keep the spatial dimensions of the extracted image features.

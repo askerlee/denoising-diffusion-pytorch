@@ -605,10 +605,11 @@ def noise_like(shape, device, repeat=False):
     noise = lambda: fast_randn(shape, device=device)
     return repeat_noise() if repeat else noise()
 
+# When t is small (~0.5*T), cosb is easier than powa (e=1). When t is large (0.5T-T), powa (e=1) is easier than cosb.
 def cosine_beta_schedule(num_timesteps, s = 0.008):
     """
     cosine schedule
-    as proposed in https://openreview.net/forum?id=-NEXDKk8gZ
+    as proposed in "Improved Denoising Diffusion Probabilistic Models".
     """
     steps = num_timesteps + 1
     x = torch.linspace(0, num_timesteps, steps, dtype = torch.float64)
@@ -617,22 +618,41 @@ def cosine_beta_schedule(num_timesteps, s = 0.008):
     betas = 1 - (alphas_cumprod[1:] / alphas_cumprod[:-1])
     return torch.clip(betas, 0, 0.999)
 
-def linear_alpha_schedule(num_timesteps):
+# powa (e=1) converges faster, but is too easy for the model to learn.
+# Using powa (e=1), a converged model may map noises to bad images.
+def power_alpha_schedule(num_timesteps, powa_exponent=3.):
     steps = num_timesteps + 1
     # Avoid setting minimal alphas_cumprod to 0. 
     # Otherwise later sqrt_recip_alphas_cumprod will be 1000, causing NaNs.
     # Setting minimal alphas_cumprod to 0.0064**2, then sqrt_recip_alphas_cumprod[-1] = 156.25.
-    alphas_cumprod = torch.linspace(1, 0.0064**2, steps, dtype = torch.float64)
+    base_alphas_cumprod = torch.linspace(1, 0.0064**(2/powa_exponent), steps, dtype = torch.float64)
+    alphas_cumprod = base_alphas_cumprod ** powa_exponent
     alphas_cumprod = alphas_cumprod / alphas_cumprod[0]
     betas = 1 - (alphas_cumprod[1:] / alphas_cumprod[:-1])
     return torch.clip(betas, 0, 0.999)
 
 # Original schedule used in https://github.com/hojonathanho/diffusion
+# linb is always harder than cosb. When t is large, the noisy images are too hard to learn.
+# For example, the first iteration of denoising result is often bad.
 def linear_beta_schedule(num_timesteps):
     scale = 1000 / num_timesteps
     beta_start = scale * 0.0001
     beta_end = scale * 0.02
     return torch.linspace(beta_start, beta_end, num_timesteps, dtype = torch.float64)
+
+def powa_linb_schedule(num_timesteps, powa_exponent=3.):
+    powa_betas = power_alpha_schedule(num_timesteps // 2, powa_exponent)
+    linb_betas = linear_beta_schedule(num_timesteps // 2)
+    powa_linb_betas = torch.cat((powa_betas, linb_betas[1:])).sort()[0]
+    powa_linb_betas = powa_linb_betas.unique()
+    return powa_linb_betas
+
+def alphas_from_betas(betas):
+    alphas = 1. - betas
+    # alphas_cumprod: \bar{alpha}_t
+    # If using power alpha (e=1) schedule, alphas_cumprod[-1] = 4.1E-5.
+    alphas_cumprod = torch.cumprod(alphas, axis=0)
+    return alphas, alphas_cumprod
 
 class GaussianDiffusion(nn.Module):
     def __init__(
@@ -643,6 +663,7 @@ class GaussianDiffusion(nn.Module):
         num_timesteps = 1000,
         sampling_timesteps = None,
         alpha_beta_schedule = 'cosb',
+        powa_exponent = 3.,
         loss_type = 'l1',
         consist_loss_type = 'cosine',
         objective = 'pred_noise',
@@ -693,26 +714,24 @@ class GaussianDiffusion(nn.Module):
         self.align_tea_stu_feat_weight  = align_tea_stu_feat_weight
         self.sample_dir = sample_dir
         self.debug = debug
-        self.num_timesteps      = num_timesteps
+        self.num_timesteps       = num_timesteps
         self.alpha_beta_schedule = alpha_beta_schedule
+        self.powa_exponent       = powa_exponent
         self.iter_count = 0
 
         if self.alpha_beta_schedule == 'cosb':
             print0("Use cosine_beta_schedule")
             betas = cosine_beta_schedule(self.num_timesteps)
-        elif self.alpha_beta_schedule == 'lina':
-            print0("Use linear_alpha_schedule")
-            betas = linear_alpha_schedule(self.num_timesteps)
+        elif self.alpha_beta_schedule == 'powa':
+            print0(f"Use power_alpha_schedule (e={self.powa_exponent})")
+            betas = power_alpha_schedule(self.num_timesteps, self.powa_exponent)
         elif self.alpha_beta_schedule == 'linb':
             print0("Use linear_beta_schedule")
             betas = linear_beta_schedule(self.num_timesteps)            
         else:
             breakpoint()
 
-        alphas = 1. - betas
-        # alphas_cumprod: \bar{alpha}_t
-        # If using linear alpha schedule, alphas_cumprod[-1] = 4.1E-5.
-        alphas_cumprod = torch.cumprod(alphas, axis=0)
+        alphas, alphas_cumprod = alphas_from_betas(betas)
         # alphas_cumprod_prev: \bar{alpha}_{t-1}
         alphas_cumprod_prev = F.pad(alphas_cumprod[:-1], (1, 0), value = 1.)
 
@@ -741,7 +760,7 @@ class GaussianDiffusion(nn.Module):
         # sqrt_one_minus_alphas_cumprod -> 1, as t -> T.
         register_buffer('sqrt_one_minus_alphas_cumprod', torch.sqrt(1. - alphas_cumprod))
         # sqrt_recip_alphas_cumprod -> a big number, as t -> T.
-        # If using linear alpha schedule & T = 1000, torch.sqrt(1. / alphas_cumprod)[-1] = 156.25.
+        # If using power alpha (e=1) schedule & T = 1000, torch.sqrt(1. / alphas_cumprod)[-1] = 156.25.
         register_buffer('sqrt_recip_alphas_cumprod',   torch.sqrt(1. / alphas_cumprod))
         register_buffer('sqrt_recipm1_alphas_cumprod', torch.sqrt(1. / alphas_cumprod - 1))
 
@@ -932,6 +951,17 @@ class GaussianDiffusion(nn.Module):
         else:
             return None
         return img, nn_img
+
+    def translate(self, img_orig, new_class, t_frac=0.8, generator=None):
+        batch_size = img_orig.shape[0]
+        image_size, channels = self.image_size, self.channels
+        sample_fn = self.p_sample_loop if not self.is_ddim_sampling else self.ddim_sample
+        
+        t = int(self.num_timesteps * t_frac)
+        img_new, classes = sample_fn((batch_size, channels, image_size, image_size), generator=generator)
+        # Find nearest neighbors in dataset.
+
+        return img_new
 
     def noisy_interpolate(self, x1, x2, t_batch, w = 0.5):
         assert x1.shape == x2.shape
