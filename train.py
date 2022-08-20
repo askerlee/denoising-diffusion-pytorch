@@ -215,6 +215,8 @@ parser.add_argument('--sample', dest='sample_only', action='store_true', help='D
 
 parser.add_argument('--trans', dest='translate_only', action='store_true', 
                     help='Do domain translation using a trained model')
+parser.add_argument('--sourceclass', dest='trans_source_class', type=int, default=-1, 
+                    help='Source class of domain translation')                    
 parser.add_argument('--targetclass', dest='trans_target_class', type=int, default=-1, 
                     help='Target class of domain translation')
 parser.add_argument('--transtfrac', dest='trans_t_frac', type=float, default=0.8,
@@ -423,8 +425,8 @@ if args.translate_only:
 
     trans_rand_generator = torch.Generator(device='cuda')
     trans_rand_generator.manual_seed(args.sample_seed)
-    translate_images(diffusion, dataset, args.batch_size, args.trans_target_class, args.sample_dir, 
-                     args.trans_t_frac, trans_rand_generator)
+    translate_images(diffusion, dataset, args.batch_size, args.trans_source_class, args.trans_target_class, 
+                     args.sample_dir, args.trans_t_frac, trans_rand_generator)
     exit()
 
 trainer = Trainer(
