@@ -967,12 +967,13 @@ class GaussianDiffusion(nn.Module):
         image_size, channels = self.image_size, self.channels
         
         t = int(self.num_timesteps * t_frac)
+        t_vec = torch.full((batch_size,), t, device=img_orig.device, dtype=torch.long)
         noise = fast_randn(img_orig.shape, device=img_orig.device, generator=generator)
         # Add noise to img_orig, then denoise it.
         # noise is generated with the provided generator, for reproducibility.
         # distill_t_frac is used to generae a less noisy image, which is different from t_frac. 
         # So it's not used here.
-        img_noisy = self.q_sample(x_start=img_orig, t=t, noise=noise, distill_t_frac=-1)
+        img_noisy = self.q_sample(x_start=img_orig, t=t_vec, noise=noise, distill_t_frac=-1)
         classes   = torch.full((batch_size,), target_class, device=img_orig.device, dtype=torch.long)
 
         sample_fn = self.p_sample_loop if not self.is_ddim_sampling else self.ddim_sample
