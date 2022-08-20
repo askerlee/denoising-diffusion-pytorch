@@ -199,7 +199,8 @@ class Trainer(object):
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--seed', type=int, default=1234, help="Random seed for initialization and training")
-parser.add_argument('--sampleseed', type=int, default=5678, help="Random seed for sampling")
+parser.add_argument('--sampleseed', dest='sample_seed', type=int, default=5678, 
+                    help="Random seed for sampling")
 
 parser.add_argument('--lr', type=float, default=2e-4, help="Learning rate")
 parser.add_argument('--bs', dest='batch_size', type=int, default=32, help="Batch size")
@@ -389,7 +390,10 @@ if args.sample_only:
     img_save_path = f'{args.sample_dir}/{milestone:03}-sample.png'
     nn_save_path  = f'{args.sample_dir}/{milestone:03}-nn.png'
     # dataset is provided for nearest neighbor imgae search.
-    sample_images(diffusion, 36, 36, dataset, img_save_path, nn_save_path)
+    sample_rand_generator = torch.Generator(device='cuda')
+    sample_rand_generator.manual_seed(args.sample_seed)
+
+    sample_images(diffusion, sample_rand_generator, 36, 36, dataset, img_save_path, nn_save_path)
     exit()
 
 trainer = Trainer(
@@ -408,7 +412,7 @@ trainer = Trainer(
     num_workers = args.num_workers,
     save_and_sample_every = args.save_sample_interval,
     sample_dir  = args.sample_dir,
-    sample_seed = args.sampleseed,
+    sample_seed = args.sample_seed,
     cp_dir      = args.cp_dir,
 )
 

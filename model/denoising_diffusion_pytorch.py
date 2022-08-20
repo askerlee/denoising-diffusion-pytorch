@@ -1115,7 +1115,7 @@ class GaussianDiffusion(nn.Module):
 
         b, device = img_gt.shape[0], img_gt.device
         assert b % 2 == 0
-        b2 = b // 2
+        b2 = b # // 2
         img_gt2 = img_gt[:b2]
         classes2 = classes[:b2]
 
