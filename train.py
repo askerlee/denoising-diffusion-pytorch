@@ -202,7 +202,7 @@ parser.add_argument('--seed', type=int, default=1234, help="Random seed for init
 parser.add_argument('--sampleseed', dest='sample_seed', type=int, default=5678, 
                     help="Random seed for sampling")
 
-parser.add_argument('--lr', type=float, default=2e-4, help="Learning rate")
+parser.add_argument('--lr', type=float, default=4e-4, help="Learning rate")
 parser.add_argument('--bs', dest='batch_size', type=int, default=32, help="Batch size")
 parser.add_argument('--clip', dest='grad_clip', type=float, default=-1, help="Gradient clipping")
 parser.add_argument('--cp', type=str, dest='cp_path', default=None, help="The path of a model checkpoint")
@@ -230,7 +230,7 @@ parser.add_argument('--times', dest='num_timesteps', type=int, default=1000,
 parser.add_argument('--mem', dest='memory_size', type=int, default=2048, 
                     help="Number of memory cells in each attention layer")
 parser.add_argument('--sched', dest='alpha_beta_schedule', type=str, choices=['cosb', 'powa', 'linb'], 
-                    default='linb', help="Type of alpha/beta schedule")
+                    default='powa', help="Type of alpha/beta schedule")
 parser.add_argument('--powa', dest='powa_exponent', type=float, default=3.,
                     help="Exponent of power-alpha schedule")
 
