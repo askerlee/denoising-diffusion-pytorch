@@ -88,6 +88,7 @@ class BaseDataset(data.Dataset):
         self.paths = []
         self.cls2indices = []
         self.index2cls = []
+        self.class_names = []
 
         self.do_geo_aug = do_geo_aug
         if self.do_geo_aug:
@@ -363,6 +364,8 @@ class ClsByFolderDataset(BaseDataset):
         img_indices = list(range(len(self.paths)))
         self.cls2indices = []
         self.index2cls   = []
+        self.class_names = []
+
         start_idx = 0
 
         # Weight of each sample for WeightedRandomSampler, to do class-balanced sampling.
@@ -379,6 +382,7 @@ class ClsByFolderDataset(BaseDataset):
             self.sample_weights += [1./len(img_list)] * len(img_list)
             start_idx = end_idx
             folder_name = folder_names[cls]
+            self.class_names.append(folder_name)
             print0("{} images in {}:'{}'. First: '{}'".format(len(img_list), cls, folder_name, img_list[0]))
             cls += 1
 
@@ -549,6 +553,8 @@ def translate_images(model, dataset, batch_size, num_batches, source_class, targ
     save_count = 0
     
     for i in range(len(dataloader)):
+        if num_batches > 0 and i >= num_batches:
+            break
         data_dict  = next(image_iter)
         img_orig   = data_dict['img_orig'].cuda()
         img_names  = data_dict['filename']

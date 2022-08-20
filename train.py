@@ -350,7 +350,8 @@ num_classes = dataset.get_num_classes()
 print0(f"world size: {args.world_size}, batch size per GPU: {args.batch_size}, seed: {args.seed}")
 
 timestamp = datetime.now().strftime("%m%d%H%M")
-args.sample_dir = os.path.join(args.sample_dir, timestamp)
+if not args.translate_only:
+    args.sample_dir = os.path.join(args.sample_dir, timestamp)
 
 unet = Unet(
     dim = 64,
@@ -426,7 +427,10 @@ if args.sample_only:
 
 if args.translate_only:
     assert args.cp_path is not None, "Please specify a checkpoint path to load for domain translation"
-    args.sample_dir = os.path.join(args.sample_dir, f'-{args.trans_t_frac:.1f}')
+    subfolder = "{}-{}-t{:.1f}-{}".format(dataset.class_names[args.trans_source_class], 
+                                          dataset.class_names[args.trans_target_class], 
+                                          args.trans_t_frac, timestamp)
+    args.sample_dir = os.path.join(args.sample_dir, subfolder)
     os.makedirs(args.sample_dir, exist_ok=True)
     print0(f"Saving translated images to {args.sample_dir}")
     trans_rand_generator = torch.Generator(device='cuda')
