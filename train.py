@@ -132,7 +132,7 @@ class Trainer(object):
                     data        = next(self.dl)
                     img         = data['img'].cuda()
                     img_orig    = data['img_orig'].cuda()
-                    classes     = data['cls'].cuda()
+                    classes     = data['class'].cuda()
 
                     with autocast(enabled = self.amp):
                         loss_dict = self.model(img, img_orig, classes, iter_count=self.step)

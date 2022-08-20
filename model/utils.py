@@ -173,7 +173,7 @@ class BaseDataset(data.Dataset):
         cls = self.index2cls[index]
         # print(img_aug.shape, path)
         # For small datasets such as pokemon, use index as the image classes.
-        return { 'img': img_aug, 'img_orig': img_orig, 'cls': cls, 'filename': os.path.basename(path) }
+        return { 'img': img_aug, 'img_orig': img_orig, 'class': cls, 'filename': os.path.basename(path) }
 
     def get_num_classes(self):
         return len(self.cls2indices)
@@ -186,19 +186,19 @@ class BaseDataset(data.Dataset):
         return: 
             images: a dict that contains a list of images and a corresponding list of classes.
         '''
-        images = { 'img': [], 'cls': [], 'img_orig': [] }
+        images = { 'img': [], 'class': [], 'img_orig': [] }
         for i in label_list:
             num_image = len(self.cls2indices[i])
             idx = np.random.randint(num_image)
             img_idx = self.cls2indices[i][idx]
             image_dict = self.__getitem__(img_idx)
             images['img'].append(image_dict['img'])
-            images['cls'].append(image_dict['cls'])
+            images['class'].append(image_dict['class'])
             images['img_orig'].append(image_dict['img_orig'])
 
         images['img'] = torch.stack(images['img'])
         images['img_orig'] = torch.stack(images['img_orig'])
-        images['cls'] = torch.tensor(images['cls'])
+        images['class'] = torch.tensor(images['class'])
 
         return images
 

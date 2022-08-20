@@ -398,7 +398,7 @@ class Unet(nn.Module):
 
         self.cls_guide_featnet_type = cls_guide_featnet_type
         if self.cls_guide_featnet_type != 'none':
-            if self.cls_guide_shares_tea_feat_ext:
+            if self.cls_guide_shares_tea_feat_ext:      # default False.
                 self.cls_guide_feat_ext = copy.deepcopy(self.dist_feat_ext_tea) 
             else:
                 self.cls_guide_feat_ext = timm.create_model(self.cls_guide_featnet_type, pretrained=True)
@@ -559,6 +559,8 @@ class Unet(nn.Module):
         # img_tea is provided. Do distillation.
         if self.distillation_type == 'tfrac' and exists(img_tea):
             # finetune_tea_feat_ext controls whether to fine-tune the teacher feature extractor.
+            # tea_feat is used as the input features to the teacher u-net. Therfore it doesn't matter
+            # whether it is in the computation graph.
             tea_feat = extract_pre_feat(self.featnet_type, self.dist_feat_ext_tea, img_tea, 
                                         mid_feat.shape[2:], 
                                         has_grad=self.finetune_tea_feat_ext, use_head_feat=False)
@@ -983,7 +985,7 @@ class GaussianDiffusion(nn.Module):
 
         return img
 
-    def calc_cls_interp_loss(self, img_gt, img_orig, classes, min_interp_w = 0., min_before_weight=True,
+    def calc_cls_interp_loss(self, img_gt, classes, min_interp_w = 0., min_before_weight=True,
                              noise_scheme='larger_t', min_t_percentile=0.8):
         assert self.cls_embed_type != 'none' and exists(classes)
 
@@ -1004,10 +1006,6 @@ class GaussianDiffusion(nn.Module):
             # Replace the second half of img_gt with randomly sampled images 
             # that are of the same classes as img_gt1.
             img_gt          = torch.cat([img_gt1, img_gt2], dim=0)
-            img_orig1       = img_orig[:b2]
-            img_orig2       = img_gt2_dict['img_orig'].cuda()
-            img_orig2       = normalize_to_neg_one_to_one(img_orig2)
-            img_orig        = torch.cat([img_orig1, img_orig2], dim=0)
             classes         = classes1.repeat(2)
 
         feat_gt = extract_pre_feat(self.featnet_type, self.denoise_fn.cls_guide_feat_ext, img_gt, ref_shape=None, 
@@ -1051,8 +1049,8 @@ class GaussianDiffusion(nn.Module):
         if within_same_class:
             cls_embed_interp = self.denoise_fn.cls_embedding(classes1)
         else:
+            # Interpolate class embeddings of two classes.
             cls_embed = self.denoise_fn.cls_embedding(classes)
-            # cls_embed = cls_embed.view(b, *((1,) * (len(img_gt.shape) - 2)), -1)
             cls_embed1, cls_embed2 = cls_embed[:b2], cls_embed[b2:]
             cls_embed_interp = w_2d * cls_embed1 + (1 - w_2d) * cls_embed2
 
@@ -1073,8 +1071,6 @@ class GaussianDiffusion(nn.Module):
                 os.makedirs(sample_dir, exist_ok=True)
                 img_gtaug_save_path  = f'{sample_dir}/{cycle_idx:03}-{self.local_rank}-gtaug.png'
                 unnorm_save_image(img_gt,   img_gtaug_save_path,  nrow = 8)
-                #img_gtorig_save_path = f'{sample_dir}/{cycle_idx:03}-{self.local_rank}-orig.png'
-                #unnorm_save_image(img_orig, img_gtorig_save_path, nrow = 8)
 
                 #print("GT images for interpolation are saved to", img_gt_save_path)
                 img_noisy_save_path = f'{sample_dir}/{cycle_idx:03}-{self.local_rank}-noise.png'
@@ -1084,6 +1080,8 @@ class GaussianDiffusion(nn.Module):
                 unnorm_save_image(img_stu_pred, img_pred_save_path, nrow = 8)
                 #print("Predicted images are saved to", img_pred_save_path)
 
+        # feat_interp is the intermediate features of the denoised images. 
+        # So it has to stay in the computation graph, and has_grad=True.
         feat_interp = extract_pre_feat(self.featnet_type, self.denoise_fn.cls_guide_feat_ext, img_stu_pred, ref_shape=None, 
                                        has_grad=True, use_head_feat=self.cls_guide_use_head_feat)
 
@@ -1110,7 +1108,9 @@ class GaussianDiffusion(nn.Module):
 
         return loss_interp
 
-    def calc_cls_single_loss(self, img_gt, img_orig, classes, noise_scheme='larger_t', min_t_percentile=0.8):
+    # cls_single_loss only considers the semantic consistency of the denoised images 
+    # with the ground truth images, taking the class embeddings as the guide.
+    def calc_cls_single_loss(self, img_gt, classes, noise_scheme='larger_t', min_t_percentile=0.8):
         assert self.cls_embed_type != 'none' and exists(classes)
 
         b, device = img_gt.shape[0], img_gt.device
@@ -1176,6 +1176,8 @@ class GaussianDiffusion(nn.Module):
                 unnorm_save_image(img_stu_pred, img_pred_save_path, nrow = 8)
                 #print("Predicted images are saved to", img_pred_save_path)
 
+        # feat_stu is the intermediate features of the denoised images. 
+        # So it has to stay in the computation graph, and has_grad=True.
         feat_stu = extract_pre_feat(self.featnet_type, self.denoise_fn.cls_guide_feat_ext, img_stu_pred, ref_shape=None, 
                                     has_grad=True, use_head_feat=self.cls_guide_use_head_feat)
 
@@ -1324,9 +1326,9 @@ class GaussianDiffusion(nn.Module):
 
         if self.cls_guide_type != 'none':
             if self.cls_guide_type == 'single':
-                loss_cls_guide = self.calc_cls_single_loss(x_start, x_orig, classes)
+                loss_cls_guide = self.calc_cls_single_loss(x_start, classes)
             elif self.cls_guide_type == 'interp':
-                loss_cls_guide = self.calc_cls_interp_loss(x_start, x_orig, classes)
+                loss_cls_guide = self.calc_cls_interp_loss(x_start, classes)
         else:
             loss_cls_guide = torch.zeros_like(loss_stu)
 
