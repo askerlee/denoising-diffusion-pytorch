@@ -541,7 +541,7 @@ def sample_images(model, rand_generator, num_images, batch_size, dataset, img_sa
 
 def translate_images(model, dataset, batch_size, source_class, target_class, 
                      save_dir, t_frac=0.8, generator=None):
-    source_sampler  = iter(dataset.cls2indices[source_class])
+    source_sampler  = dataset.cls2indices[source_class]
     dataloader      = data.DataLoader(dataset, batch_size = batch_size, sampler = source_sampler, 
                                       shuffle = False, drop_last = False, num_workers = 2)
 

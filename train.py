@@ -406,6 +406,7 @@ if args.cp_path is not None:
     ema = EMA(diffusion)
     ema.load_state_dict(torch.load(args.cp_path)['ema'])
     diffusion = ema.ema_model
+    print0("Loaded checkpoint from {}".format(args.cp_path))
     
 if args.sample_only:
     assert args.cp_path is not None, "Please specify a checkpoint path to load for sampling"
