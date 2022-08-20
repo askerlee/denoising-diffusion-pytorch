@@ -334,7 +334,7 @@ num_classes = dataset.get_num_classes()
 print0(f"world size: {args.world_size}, batch size per GPU: {args.batch_size}, seed: {args.seed}")
 
 timestamp = datetime.now().strftime("%m%d%H%M")
-args.sample_dir = os.path.join((args.sample_dir, timestamp))
+args.sample_dir = os.path.join(args.sample_dir, timestamp)
 print0(f"Saving samples to {args.sample_dir}")
 
 unet = Unet(
