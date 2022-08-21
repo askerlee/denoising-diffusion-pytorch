@@ -219,7 +219,9 @@ parser.add_argument('--sourceclass', dest='trans_source_class', type=int, defaul
                     help='Source class of domain translation')                    
 parser.add_argument('--targetclass', dest='trans_target_class', type=int, default=-1, 
                     help='Target class of domain translation')
-parser.add_argument('--transtfrac', dest='trans_t_frac', type=float, default=0.8,
+parser.add_argument('--transnoisetfrac', dest='trans_noise_t_frac', type=float, default=0.1,
+                    help='Amount of added noise used by domain translation, specified as a fraction of the max steps')
+parser.add_argument('--transdenoisetfrac', dest='trans_denoise_t_frac', type=float, default=0.4,
                     help='Number of denoising steps used by domain translation, specified as a fraction of the max steps')
 parser.add_argument('--transbatches', dest='trans_num_batches', type=int, default=-1,
                     help='Number of batches of images to translate (default: -1, all batches)')
@@ -248,7 +250,7 @@ parser.add_argument('--mem', dest='memory_size', type=int, default=2048,
                     help="Number of memory cells in each attention layer")
 parser.add_argument('--sched', dest='alpha_beta_schedule', type=str, choices=['cosb', 'powa', 'linb'], 
                     default='powa', help="Type of alpha/beta schedule")
-parser.add_argument('--powa', dest='powa_exponent', type=float, default=3.,
+parser.add_argument('--powa-exp', dest='powa_exponent', type=float, default=3.,
                     help="Exponent of power-alpha schedule")
 
 parser.add_argument('--losstype', dest='loss_type', type=str, choices=['l1', 'l2'], default='l1', 
@@ -432,7 +434,7 @@ if args.translate_only:
     assert args.cp_path is not None, "Please specify a checkpoint path to load for domain translation"
     subfolder = "{}-{}-t{:.2f}-{}".format(dataset.class_names[args.trans_source_class], 
                                           dataset.class_names[args.trans_target_class], 
-                                          args.trans_t_frac, timestamp)
+                                          args.trans_noise_t_frac, args.trans_denoise_t_frac, timestamp)
     args.sample_dir = os.path.join(args.sample_dir, subfolder)
     os.makedirs(args.sample_dir, exist_ok=True)
     print0(f"Saving translated images to {args.sample_dir}")
@@ -440,7 +442,8 @@ if args.translate_only:
     trans_rand_generator.manual_seed(args.sample_seed)
     translate_images(diffusion, dataset, args.batch_size, args.trans_num_batches, 
                      args.trans_source_class, args.trans_target_class, 
-                     args.sample_dir, args.trans_t_frac, trans_rand_generator)
+                     args.sample_dir, args.args.trans_noise_t_frac, args.trans_denoise_t_frac, 
+                     trans_rand_generator)
     exit()
 
 trainer = Trainer(

@@ -609,7 +609,7 @@ def noise_like(shape, device, repeat=False):
     noise = lambda: fast_randn(shape, device=device)
     return repeat_noise() if repeat else noise()
 
-# When t is small (~0.5*T), cosb is easier than powa (e=1). When t is large (0.5T-T), powa (e=1) is easier than cosb.
+# When t is small (< ~0.5*T), cosb is easier than powa (e=1). When t is large (0.5T-T), powa (e=1) is easier than cosb.
 def cosine_beta_schedule(num_timesteps, s = 0.008):
     """
     cosine schedule
@@ -964,11 +964,11 @@ class GaussianDiffusion(nn.Module):
             return None
         return img, nn_img
 
-    def translate(self, img_orig, target_class, t_frac=0.8, generator=None):
+    def translate(self, img_orig, target_class, noise_t_frac=0.1, denoise_t_frac=0.5, generator=None):
         batch_size = img_orig.shape[0]
         image_size, channels = self.image_size, self.channels
         
-        t = int(self.num_timesteps * t_frac)
+        t = int(self.num_timesteps * noise_t_frac)
         t_vec = torch.full((batch_size,), t, device=img_orig.device, dtype=torch.long)
         noise = fast_randn(img_orig.shape, device=img_orig.device, generator=generator)
         # Add noise to img_orig, then denoise it.
@@ -979,9 +979,11 @@ class GaussianDiffusion(nn.Module):
         classes   = torch.full((batch_size,), target_class, device=img_orig.device, dtype=torch.long)
 
         sample_fn = self.p_sample_loop if not self.is_ddim_sampling else self.ddim_sample
+        denoise_steps = int(self.num_timesteps * denoise_t_frac)
         # img_new has been unnormalized to zero to one.
         img_new, classes = sample_fn((batch_size, channels, image_size, image_size), noise=img_noisy,
-                                     classes_or_embed=classes, num_timesteps=t, generator=generator)
+                                     classes_or_embed=classes, num_timesteps=denoise_steps, 
+                                     generator=generator)
         return img_new, img_noisy
 
     def noisy_interpolate(self, x1, x2, t_batch, w = 0.5):

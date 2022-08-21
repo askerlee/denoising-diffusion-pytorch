@@ -544,7 +544,7 @@ def sample_images(model, rand_generator, num_images, batch_size, dataset, img_sa
         print0("")
 
 def translate_images(model, dataset, batch_size, num_batches, source_class, target_class, 
-                     save_dir, t_frac=0.8, generator=None):
+                     save_dir, noise_t_frac=0.1, denoise_t_frac=0.5, generator=None):
     source_sampler  = dataset.cls2indices[source_class]
     dataloader      = data.DataLoader(dataset, batch_size = batch_size, sampler = source_sampler, 
                                       shuffle = False, drop_last = False, num_workers = 2)
@@ -558,8 +558,8 @@ def translate_images(model, dataset, batch_size, num_batches, source_class, targ
         data_dict  = next(image_iter)
         img_orig   = data_dict['img_orig'].cuda()
         img_names  = data_dict['filename']
-        img_new, img_noisy  = model.translate(img_orig, target_class, t_frac, generator)
-        
+        img_new, img_noisy  = model.translate(img_orig, target_class, noise_t_frac, denoise_t_frac, generator)
+
         img_noisy.clamp_(-1., 1.)
         img_noisy = unnormalize_to_zero_to_one(img_noisy)
         img_stitch = torch.cat([img_orig, img_noisy, img_new], dim=3)
