@@ -430,7 +430,7 @@ if args.sample_only:
 
 if args.translate_only:
     assert args.cp_path is not None, "Please specify a checkpoint path to load for domain translation"
-    subfolder = "{}-{}-t{:.1f}-{}".format(dataset.class_names[args.trans_source_class], 
+    subfolder = "{}-{}-t{:.2f}-{}".format(dataset.class_names[args.trans_source_class], 
                                           dataset.class_names[args.trans_target_class], 
                                           args.trans_t_frac, timestamp)
     args.sample_dir = os.path.join(args.sample_dir, subfolder)
