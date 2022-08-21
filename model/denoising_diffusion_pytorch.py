@@ -982,7 +982,7 @@ class GaussianDiffusion(nn.Module):
         # img_new has been unnormalized to zero to one.
         img_new, classes = sample_fn((batch_size, channels, image_size, image_size), noise=img_noisy,
                                      classes_or_embed=classes, num_timesteps=t, generator=generator)
-        return img_new
+        return img_new, img_noisy
 
     def noisy_interpolate(self, x1, x2, t_batch, w = 0.5):
         assert x1.shape == x2.shape

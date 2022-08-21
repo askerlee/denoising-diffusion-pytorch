@@ -559,12 +559,13 @@ def translate_images(model, dataset, batch_size, num_batches, source_class, targ
         img_orig   = data_dict['img_orig'].cuda()
         img_names  = data_dict['filename']
 
-        img_new    = model.translate(img_orig, target_class, t_frac, generator)
-        img_new_np = (img_new.detach().cpu().numpy() * 255.0).astype(np.uint8)
-        img_new_np = img_new_np.transpose(0, 2, 3, 1)
-        img_new_np = img_new_np[:, :, :, ::-1]  # RGB to BGR for cv2.imwrite().
+        img_new, img_noisy  = model.translate(img_orig, target_class, t_frac, generator)
+        img_stitch = torch.cat([img_orig, img_noisy, img_new], dim=3)
+        img_stitch_np = (img_stitch.detach().cpu().numpy() * 255.0).astype(np.uint8)
+        img_stitch_np = img_stitch_np.transpose(0, 2, 3, 1)
+        img_stitch_np = img_stitch_np[:, :, :, ::-1]  # RGB to BGR for cv2.imwrite().
 
-        for img_name, img_np in zip(img_names, img_new_np):
+        for img_name, img_np in zip(img_names, img_stitch_np):
             save_path = os.path.join(save_dir, img_name)
             cv2.imwrite(save_path, img_np)
             save_count += 1
