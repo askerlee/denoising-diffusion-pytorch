@@ -246,6 +246,9 @@ parser.add_argument('--savecp',  dest='cp_dir', type=str, default='checkpoints',
 
 parser.add_argument('--steps', dest='num_timesteps', type=int, default=1000, 
                     help="Number of maximum diffusion steps")
+parser.add_argument('--sampsteps', dest='sampling_timesteps', type=int, default=None, 
+                    help="Number of sampling steps")
+
 parser.add_argument('--mem', dest='memory_size', type=int, default=2048, 
                     help="Number of memory cells in each attention layer")
 parser.add_argument('--sched', dest='alpha_beta_schedule', type=str, choices=['cosb', 'powa', 'linb'], 
@@ -379,6 +382,7 @@ diffusion = GaussianDiffusion(
     unet,                                           # denoise_fn
     image_size = args.image_size,                   # Input image is resized to image_size before augmentation.
     num_timesteps = args.num_timesteps,             # number of maximum diffusion steps
+    sampling_timesteps = args.sampling_timesteps,   # number of steps to sample from the diffusion process
     alpha_beta_schedule = args.alpha_beta_schedule, # alpha/beta schedule
     powa_exponent = args.powa_exponent,             # exponent of the power-alpha schedule.
     loss_type = args.loss_type,                     # L1, L2, lap (Laplacian)
