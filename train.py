@@ -442,7 +442,7 @@ if args.translate_only:
     trans_rand_generator.manual_seed(args.sample_seed)
     translate_images(diffusion, dataset, args.batch_size, args.trans_num_batches, 
                      args.trans_source_class, args.trans_target_class, 
-                     args.sample_dir, args.args.trans_noise_t_frac, args.trans_denoise_t_frac, 
+                     args.sample_dir, args.trans_noise_t_frac, args.trans_denoise_t_frac, 
                      trans_rand_generator)
     exit()
 
