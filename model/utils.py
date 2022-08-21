@@ -558,8 +558,10 @@ def translate_images(model, dataset, batch_size, num_batches, source_class, targ
         data_dict  = next(image_iter)
         img_orig   = data_dict['img_orig'].cuda()
         img_names  = data_dict['filename']
-
         img_new, img_noisy  = model.translate(img_orig, target_class, t_frac, generator)
+        
+        img_noisy.clamp_(-1., 1.)
+        img_noisy = unnormalize_to_zero_to_one(img_noisy)
         img_stitch = torch.cat([img_orig, img_noisy, img_new], dim=3)
         img_stitch_np = (img_stitch.detach().cpu().numpy() * 255.0).astype(np.uint8)
         img_stitch_np = img_stitch_np.transpose(0, 2, 3, 1)

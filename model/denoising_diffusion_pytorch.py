@@ -1199,7 +1199,7 @@ class GaussianDiffusion(nn.Module):
         alphas_cumprod  = extract_tensor(self.alphas_cumprod, t, x_start.shape)
         x_start_weight  = torch.sqrt(alphas_cumprod)
         noise_weight    = torch.sqrt(1 - alphas_cumprod)
-        x_noisy1 = x_start_weight * x_start + noise_weight * noise
+        x_noisy1        = x_start_weight * x_start + noise_weight * noise
 
         if self.debug and self.iter_count >=0 and self.iter_count < 10:
             print0(f'{self.iter_count} x_start_weight\n{x_start_weight.flatten()}')
